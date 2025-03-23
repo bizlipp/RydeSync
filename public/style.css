@@ -57,3 +57,27 @@ button:hover {
   font-size: 1.1rem;
   color: #00ff99;
 }
+
+#controls {
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+#volume {
+  width: 200px;
+  margin: 0 1rem;
+}
+
+.loader {
+  margin: 20px auto;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #DC143C;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
