@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>RydeSync – P2P Voice</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="https://aerovistaassets.s3.amazonaws.com/favicon.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Montserrat:wght@300;400&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="RydeSync - Secure P2P Voice Communication">
+  <meta name="theme-color" content="#DC143C">
+</head>
+<body>
+  <h1>🎧 RydeSync</h1>
+  <p class="subtitle">Peer-to-Peer Voice Communication<br><span class="brand">by AeroVista LLC</span></p>
+
+  <input id="room" placeholder="Enter Room Name" autocomplete="off" />
+  <button onclick="joinRoom()">Join Room</button>
+
+  <div id="status">🔧 Waiting for input...</div>
+  
+  <div id="controls" style="display:none">
+    <label for="volume">Volume:</label>
+    <input type="range" id="volume" min="0" max="100" value="100">
+  </div>
+
+  <div id="loader" class="loader" style="display:none"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
