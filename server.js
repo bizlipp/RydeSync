@@ -7,6 +7,8 @@ const path = require("path");
 const app = express();
 const peers = new Set();
 
+console.log("🧪 Render injected PORT:", process.env.PORT);
+
 // 🔐 Optional: CORS middleware (safe defaults)
 const cors = require("cors");
 app.use(cors());
@@ -64,6 +66,6 @@ server.listen(PORT, () => {
   console.log("🌐 Static UI: /index.html");
   console.log("📡 PeerJS API: /");
   console.log("🧑‍🤝‍🧑 Peer list: /peers");
-  console.log("✅ RydeSync server: version 1.0.4");
+  console.log("-V RydeSync server: 1.0.5");
   console.log("========================================\n");
 });
