@@ -64,5 +64,6 @@ server.listen(PORT, () => {
   console.log("🌐 Static UI: /index.html");
   console.log("📡 PeerJS API: /");
   console.log("🧑‍🤝‍🧑 Peer list: /peers");
+  console.log("✅ RydeSync server: version 1.0.4");
   console.log("========================================\n");
 });
