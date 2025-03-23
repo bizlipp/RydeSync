@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Montserrat:wght@300;400&display=swap');
+
+body {
+  background: #0e0e0e;
+  color: #F8F8F8;
+  font-family: 'Montserrat', sans-serif;
+  text-align: center;
+  padding: 2rem;
+  margin: 0;
+}
+
+h1 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.8rem;
+  color: #DC143C;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 0 6px #DC143C88;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: #ccc;
+  margin-bottom: 2rem;
+}
+
+.brand {
+  font-style: italic;
+  color: #DC143C;
+  font-weight: bold;
+}
+
+input, button {
+  padding: 0.75rem 1.2rem;
+  margin: 0.5rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 8px;
+  background: #1a1a1a;
+  color: #F8F8F8;
+  box-shadow: 0 0 4px #DC143C88;
+  transition: all 0.2s ease-in-out;
+}
+
+input::placeholder {
+  color: #aaa;
+}
+
+button:hover {
+  background: #DC143C;
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 0 6px #DC143Ccc;
+}
+
+#status {
+  margin-top: 1.5rem;
+  font-size: 1.1rem;
+  color: #00ff99;
+}
+
+#controls {
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+#volume {
+  width: 200px;
+  margin: 0 1rem;
+}
+
+.loader {
+  margin: 20px auto;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #DC143C;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
