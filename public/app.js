@@ -8,8 +8,14 @@ async function joinRoom() {
 
   document.getElementById("status").innerText = `🎤 Connecting to "${room}"...`;
 
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  console.log("🎤 Got mic stream:", localStream);
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("🎤 Got mic stream:", localStream);
+  } catch (err) {
+    console.error("🚫 Mic access denied:", err);
+    document.getElementById("status").innerText = "🚫 Please allow mic access";
+    return;
+  }
 
   peer = new Peer(undefined, {
     host: location.hostname,
@@ -64,5 +70,20 @@ function handleCall(call) {
     audio.autoplay = true;
     document.body.appendChild(audio);
     connections.push(call);
+
+    // Show volume controls
+    document.getElementById("controls").style.display = "block";
+
+    // Setup volume control
+    const slider = document.getElementById("volume");
+    audio.volume = slider.value / 100;
+    slider.oninput = (e) => {
+      audio.volume = e.target.value / 100;
+    };
+  });
+
+  call.on("error", (err) => {
+    console.error("❌ Call error:", err);
+    document.getElementById("status").innerText = `⚠️ Call error: ${err.type}`;
   });
 }
