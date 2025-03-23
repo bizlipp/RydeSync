@@ -6,6 +6,7 @@ const path = require("path");
 
 const app = express();
 const peers = new Set();
+const rooms = new Map(); // Track peers by room
 
 console.log("🧪 Render injected PORT:", process.env.PORT);
 
@@ -43,12 +44,35 @@ peerServer.on("disconnect", (client) => {
   if (id) {
     console.log(`❌ Peer disconnected: ${id}`);
     peers.delete(id);
+    // Clean up rooms
+    rooms.forEach((peers, room) => {
+      peers.delete(id);
+      if (peers.size === 0) {
+        rooms.delete(room);
+      }
+    });
   }
+});
+
+// Add room management endpoints
+app.post('/join/:room/:peerId', (req, res) => {
+  const { room, peerId } = req.params;
+  if (!rooms.has(room)) {
+    rooms.set(room, new Set());
+  }
+  rooms.get(room).add(peerId);
+  console.log(`👥 Peer ${peerId} joined room ${room}`);
+  res.sendStatus(200);
 });
 
 // 🧑‍🤝‍🧑 Discovery route for frontend polling
 app.get("/peers", (req, res) => {
-  res.json(Array.from(peers));
+  const room = req.query.room;
+  if (room && rooms.has(room)) {
+    res.json(Array.from(rooms.get(room)));
+  } else {
+    res.json(Array.from(peers));
+  }
 });
 
 // 🛠 Future-proof root route (optional)
