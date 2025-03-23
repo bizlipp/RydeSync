@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>RydeSync – P2P Voice</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="https://aerovistaassets.s3.amazonaws.com/favicon.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Montserrat:wght@300;400&display=swap" rel="stylesheet">
+</head>
+<body>
+  <h1>🎧 RydeSync</h1>
+  <p class="subtitle">Peer-to-Peer Voice Communication<br><span class="brand">by AeroVista LLC</span></p>
+
+  <input id="room" placeholder="Enter Room Name" />
+  <button onclick="joinRoom()">Join Room</button>
+
+  <div id="status">🔧 Waiting for input...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
