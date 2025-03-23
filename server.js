@@ -1,32 +1,49 @@
 const express = require("express");
-const { PeerServer } = require("peer");
+const { ExpressPeerServer } = require("peer");
+const http = require("http");
+
 const app = express();
 const peers = new Set();
 
-// Serve static files from /public
+// Serve static frontend from /public
 app.use(express.static("public"));
 
-// Create the HTTP server
-const server = app.listen(process.env.PORT || 9000, () => {
-  const port = server.address().port;
-  console.log(`🚀 RydeSync server running on port ${port}`);
+// Create HTTP server
+const server = http.createServer(app);
+
+// Set up PeerJS signaling server as middleware
+const peerServer = ExpressPeerServer(server, {
+  path: "/",
+  debug: true,
 });
 
-// Set up the PeerJS signaling server
-const peerServer = PeerServer({ server, path: "/" });
+// Attach PeerJS middleware
+app.use("/", peerServer);
 
-// Track connected peers for manual peer listing
-peerServer.on("connection", client => {
-  console.log("🔗 Peer connected:", client.getId());
-  peers.add(client.getId());
+// Track connected peers
+peerServer.on("connection", (client) => {
+  const id = client.getId?.();
+  if (id) {
+    console.log("🔗 Peer connected:", id);
+    peers.add(id);
+  }
 });
 
-peerServer.on("disconnect", client => {
-  console.log("❌ Peer disconnected:", client.getId());
-  peers.delete(client.getId());
+peerServer.on("disconnect", (client) => {
+  const id = client.getId?.();
+  if (id) {
+    console.log("❌ Peer disconnected:", id);
+    peers.delete(id);
+  }
 });
 
-// Optional: Provide a basic list of peer IDs (simple discovery)
+// Peer discovery route
 app.get("/peers", (req, res) => {
   res.json(Array.from(peers));
+});
+
+// Start the combined server
+const PORT = process.env.PORT || 9000;
+server.listen(PORT, () => {
+  console.log(`🚀 RydeSync server listening on port ${PORT}`);
 });
