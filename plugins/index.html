@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RydeSync Plugin Gallery</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-color: #00AEEF;
+      --secondary-color: #FF5722;
+      --bg-color: #121212;
+      --text-color: #f0f0f0;
+      --card-bg: #1e1e1e;
+      --border-radius: 8px;
+    }
+    
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+    
+    header {
+      background-color: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(10px);
+      padding: 1rem 2rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    h1 {
+      font-family: 'Orbitron', sans-serif;
+      text-align: center;
+      margin: 0;
+      color: var(--primary-color);
+    }
+    
+    .subtitle {
+      text-align: center;
+      font-size: 1rem;
+      margin-top: 0.5rem;
+      margin-bottom: 2rem;
+      opacity: 0.8;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 2rem;
+    }
+    
+    .plugin-card {
+      background-color: var(--card-bg);
+      border-radius: var(--border-radius);
+      overflow: hidden;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .plugin-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+    }
+    
+    .plugin-preview {
+      height: 160px;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .plugin-info {
+      padding: 1.5rem;
+    }
+    
+    .plugin-name {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.2rem;
+      margin: 0 0 0.5rem 0;
+    }
+    
+    .plugin-desc {
+      font-size: 0.9rem;
+      opacity: 0.8;
+      margin-bottom: 1rem;
+    }
+    
+    .plugin-features {
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+    }
+    
+    .feature-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.3rem;
+    }
+    
+    .feature-icon {
+      margin-right: 0.5rem;
+      opacity: 0.9;
+    }
+    
+    .plugin-actions {
+      display: flex;
+      gap: 1rem;
+    }
+    
+    .btn {
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: var(--border-radius);
+      font-family: 'Montserrat', sans-serif;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      text-decoration: none;
+      font-size: 0.9rem;
+      flex: 1;
+      text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .btn-secondary {
+      background-color: transparent;
+      border: 1px solid var(--primary-color);
+      color: var(--primary-color);
+    }
+    
+    .btn:hover {
+      background-color: #0096cc;
+    }
+    
+    .btn-secondary:hover {
+      background-color: rgba(0, 174, 239, 0.1);
+    }
+    
+    .preview-player {
+      max-width: 100%;
+      margin-top: 1rem;
+    }
+    
+    /* Theme preview classes */
+    .theme-foxecho {
+      background: linear-gradient(135deg, #2c3e50, #4ca1af);
+    }
+    
+    .theme-syntheticsouls {
+      background: linear-gradient(135deg, #16222a, #3a6073);
+    }
+    
+    .theme-timbrhq {
+      background: linear-gradient(135deg, #ff416c, #ff4b2b);
+    }
+    
+    .plugin-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.6);
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    footer {
+      text-align: center;
+      padding: 2rem;
+      margin-top: 3rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+    }
+    
+    @media (max-width: 768px) {
+      .gallery {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      }
+      
+      .plugin-preview {
+        height: 120px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎧 RydeSync Plugin Gallery</h1>
+  </header>
+  
+  <div class="container">
+    <p class="subtitle">Explore and preview theme plugins for your music rooms</p>
+    
+    <div id="pluginGallery" class="gallery">
+      <!-- Plugin cards will be dynamically inserted here -->
+      <div class="plugin-card">
+        <div class="plugin-preview theme-foxecho">
+          <div class="plugin-badge">Nature</div>
+        </div>
+        <div class="plugin-info">
+          <h3 class="plugin-name">Fox Echo</h3>
+          <p class="plugin-desc">Peaceful meditation chamber with nature-inspired visuals</p>
+          <div class="plugin-features">
+            <div class="feature-item"><span class="feature-icon">🎵</span> Ambient playlist</div>
+            <div class="feature-item"><span class="feature-icon">🔄</span> Music loop enabled</div>
+            <div class="feature-item"><span class="feature-icon">🎙️</span> Mic disabled for quiet</div>
+          </div>
+          <div class="plugin-actions">
+            <a href="/#foxecho" class="btn">Join Room</a>
+            <button class="btn btn-secondary preview-toggle">Preview</button>
+          </div>
+          <audio class="preview-player" controls style="display:none;">
+            <source src="https://example.com/music/autumn-breeze.mp3" type="audio/mpeg">
+          </audio>
+        </div>
+      </div>
+      
+      <!-- Loading placeholder -->
+      <div id="loadingPlaceholder" class="plugin-card">
+        <div class="plugin-preview">
+          <div class="plugin-badge">Loading...</div>
+        </div>
+        <div class="plugin-info">
+          <h3 class="plugin-name">Loading plugins...</h3>
+          <p class="plugin-desc">Please wait while we fetch available plugins</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <footer>
+    RydeSync Plugin Gallery &copy; AeroVista LLC
+  </footer>
+
+  <script src="gallery.js"></script>
+</body>
+</html> 

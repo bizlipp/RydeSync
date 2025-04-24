@@ -1,0 +1,41 @@
+ # Node dependencies
+node_modules/
+
+# Build artifacts
+dist/
+dist-electron/
+dist_dev/
+win-unpacked/
+*.log
+
+# Electron packaging output
+*.exe
+*.dmg
+*.deb
+*.AppImage
+
+# Vite build cache
+.vite/
+.cache/
+
+# Firebase config files (optional, if local only)
+firebase-debug.log
+.firebaserc
+
+# Local env and secrets
+.env
+.env.*
+
+# OS/System files
+.DS_Store
+Thumbs.db
+
+# IDE/editor folders
+.vscode/
+.idea/
+*.swp
+
+# Misc
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

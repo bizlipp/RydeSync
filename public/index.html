@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>RydeSync – Secure P2P Voice | AeroVista LLC</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="https://aerovistaassets.s3.amazonaws.com/favicon.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="RydeSync - Secure P2P Voice Communication by AeroVista LLC">
+  <meta name="theme-color" content="#00AEEF">
+  <style>
+    /* Connection status styles */
+    .connection-status {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 8px 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 1000;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    
+    .connection-status.connected {
+      background-color: rgba(0, 180, 0, 0.8);
+      color: white;
+    }
+    
+    .connection-status.disconnected {
+      background-color: rgba(220, 0, 0, 0.8);
+      color: white;
+    }
+    
+    .connection-status.reconnecting {
+      background-color: rgba(255, 165, 0, 0.8);
+      color: white;
+    }
+    
+    .connection-status.warning {
+      background-color: rgba(255, 203, 0, 0.8);
+      color: black;
+    }
+    
+    .connection-status.failed {
+      background-color: rgba(120, 0, 0, 0.9);
+      color: white;
+    }
+    
+    #reconnectBtn {
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s ease;
+    }
+    
+    #reconnectBtn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.3);
+    }
+    
+    #reconnectBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* Peer activity visualization */
+    .peers-container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 15px;
+      background: rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      margin-top: 20px;
+      display: none; /* Hidden by default */
+    }
+    
+    .peers-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .peer-item {
+      display: flex;
+      padding: 8px;
+      margin-bottom: 6px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.2);
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.3s ease;
+    }
+    
+    .peer-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: white;
+      margin-right: 10px;
+    }
+    
+    .peer-info {
+      flex: 1;
+    }
+    
+    .peer-activity-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-left: 10px;
+    }
+    
+    /* Activity levels */
+    .activity-active {
+      background-color: #00c853;
+      box-shadow: 0 0 8px #00c853;
+    }
+    
+    .activity-recent {
+      background-color: #ffab00;
+    }
+    
+    .activity-idle {
+      background-color: #8d6e63;
+    }
+    
+    .activity-inactive {
+      background-color: #b0bec5;
+      opacity: 0.5;
+    }
+    
+    /* Fade out inactive peers */
+    .peer-fade-25 { opacity: 0.75; }
+    .peer-fade-50 { opacity: 0.5; }
+    .peer-fade-75 { opacity: 0.25; }
+    
+    .refresh-peers {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: white;
+    }
+    
+    .peer-time {
+      font-size: 11px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div id="peerCount">🟢 0 riders online</div>
+  
+  <button id="aboutBtn" class="about-btn" title="About RydeSync">
+    <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="16" x2="12" y2="12"></line>
+      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+    </svg>
+  </button>
+  
+  <h1>🎧 RydeSync</h1>
+  <p class="subtitle">Secure Peer-to-Peer Voice Communication<br><span class="brand">by AeroVista LLC</span></p>
+  <p class="tagline">Where Vision Takes Flight</p>
+
+  <input id="room" placeholder="Enter Room Name" autocomplete="off" />
+  <button id="joinBtn" onclick="joinRoom()">
+    <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3"/>
+    </svg>
+    Join Room
+  </button>
+
+  <div id="musicSyncUI" style="text-align:center; margin-top:2rem;">
+    <h3>🎵 Music Sync</h3>
+    <input id="trackURL" placeholder="Paste track URL" style="width:60%" />
+    <button onclick="playTrack()">Play in Room</button>
+    <p style="font-size:0.8rem; margin-top:0.5rem; color:#666;">Uses the music player below for playback control</p>
+  </div>
+
+  <div id="status">🔧 Waiting for input...</div>
+  
+  <!-- Peer Activity Container -->
+  <div id="peersContainer" class="peers-container">
+    <div class="peers-header">
+      <h3>🎤 Active Riders</h3>
+      <button id="refreshPeers" class="refresh-peers">Refresh</button>
+    </div>
+    <div id="peersList"></div>
+  </div>
+  
+  <div id="controls" style="display:none">
+    <div class="control-group">
+      <label for="volume">Volume:</label>
+      <input type="range" id="volume" min="0" max="100" value="100">
+    </div>
+    <button id="muteBtn">
+      <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      </svg>
+      Mute
+    </button>
+  </div>
+
+  <div id="loader" class="loader" style="display:none"></div>
+
+  <footer class="footer">
+    Built with <span class="neon-text">🔥</span> by AeroVista LLC – v1.1.0
+  </footer>
+
+  <!-- Music Player toggle button (outside of the music player div) -->
+  <button id="togglePlayer" title="Toggle Music Player">▲</button>
+
+  <div id="musicPlayer" class="collapsed">
+    <div id="musicHeader">
+      <span id="musicTitle">MUSIC PLAYER</span>
+    </div>
+
+    <div id="playerBody">
+      <audio id="audioPlayer" controls></audio>
+      
+      <div class="track-controls">
+        <button id="prevTrack" title="Previous Track">⏮</button>
+        <button id="playPause" title="Play/Pause">▶</button>
+        <button id="nextTrack" title="Next Track">⏭</button>
+        <button id="shuffleBtn" title="Shuffle">🔀</button>
+      </div>
+      
+      <div id="filePickerArea">
+        <button id="loadMusic">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          SELECT SONGS
+          <span class="mobile-text">FROM YOUR DEVICE</span>
+        </button>
+        <input
+          type="file"
+          id="musicFiles"
+          accept="audio/*"
+          multiple
+          style="display:none;"
+        />
+      </div>
+      
+      <div class="player-tip">
+        <span class="tip-icon">💡</span>
+        <span>You can also drag &amp; drop multiple audio files here</span>
+      </div>
+
+      <div class="playlist-header">
+        <h3>YOUR PLAYLIST</h3>
+        <button id="clearPlaylist" title="Clear Playlist">CLEAR ALL</button>
+      </div>
+
+      <div class="mobile-helper">
+        <p>Tap a song to play it. Use the buttons above to control playback.</p>
+      </div>
+
+      <ul id="trackList"></ul>
+    </div>
+  </div>
+
+  <!-- About Modal -->
+  <div id="aboutModal" class="modal">
+    <div class="modal-content">
+      <button id="closeAboutBtn" class="close-btn">&times;</button>
+      
+      <div class="about-content">
+        <h2>🎧 RydeSync – Peer-to-Peer Voice Communication for Riders & Rebels</h2>
+        <p class="about-description"><strong>Created by AeroVista LLC</strong></p>
+
+        <p>RydeSync is a stylish, lightweight, and secure P2P voice comms tool built for real-time audio communication without relying on centralized servers. Whether you're syncing up with your motorcycle crew, jamming with your creative team, or keeping a tactical squad tight-knit — RydeSync gets you connected with <strong>zero fluff, no Discord needed</strong>.</p>
+
+        <div class="section">
+          <h3>✨ Features</h3>
+          <ul>
+            <li>🎤 <strong>Real-time P2P Voice Chat</strong> using WebRTC (via PeerJS)</li>
+            <li>🔇 <strong>Mute & Volume Controls</strong> per user</li>
+            <li>🎶 <strong>Built-in Music Player</strong> (locally controlled, mobile-ready)</li>
+            <li>🔥 <strong>Sleek UI</strong> with Orbitron/Montserrat fonts and animated glitch dark mode</li>
+            <li>🧑‍🤝‍🧑 <strong>Room-based architecture</strong> — just type a room name and connect</li>
+            <li>📱 <strong>Fully responsive</strong> and touch gesture compatible</li>
+            <li>⚡ <strong>No account required</strong>, no central audio server</li>
+          </ul>
+        </div>
+  
+        <div class="section">
+          <h3>📦 Tech Stack</h3>
+          <ul>
+            <li>🧠 <strong>PeerJS</strong> (WebRTC wrapper)</li>
+            <li>⚙️ <strong>Express</strong> (static hosting + signaling)</li>
+            <li>💅 <strong>Vanilla JS, HTML, CSS</strong> (no framework overhead)</li>
+            <li>📲 Fully compatible with <strong>Firebase Hosting (frontend)</strong> + <strong>Render (server)</strong></li>
+          </ul>
+        </div>
+
+        <div class="section">
+          <h3>🛡️ Privacy & Security</h3>
+          <ul>
+            <li>No voice data stored.</li>
+            <li>No accounts.</li>
+            <li>Peer-to-peer voice only.</li>
+            <li>HTTPS and secure signaling recommended for production.</li>
+          </ul>
+        </div>
+
+        <div class="section">
+          <h3>📡 Limitations & Notes</h3>
+          <ul>
+            <li>Max ~5 users per room recommended for stable peer-to-peer audio</li>
+            <li>Music player is local only (not broadcast to others — yet 😉)</li>
+            <li>Safari/WebKit support may require tweaks for autoplay policies</li>
+          </ul>
+        </div>
+
+        <div class="section">
+          <h3>💬 Future Enhancements</h3>
+          <ul>
+            <li>📻 Music broadcast mode (host streams to listeners)</li>
+            <li>👥 Push-to-talk + talker queue system</li>
+            <li>🔐 Room passwords & access control</li>
+            <li>🔊 Optional SFU server for large-scale audio rooms</li>
+            <li>📱 Full APK/Capacitor build for native Android installs</li>
+          </ul>
+        </div>
+
+        <div class="section company-info">
+          <h3>🧠 Created With Love by</h3>
+          <p><strong>AeroVista LLC</strong><br>
+          ✨ Innovating for creators, dreamers, and rebels<br>
+          🌐 <a href="https://aerovista.us" target="_blank">@aerovista</a></p>
+        </div>
+
+        <div class="section">
+          <h3>📄 License</h3>
+          <p>MIT – use it, remix it, Ryde with it.</p>
+        </div>
+
+        <blockquote>
+          "No wires. No limits. Just your voice and the open road." – <em>RydeSync Team</em>
+        </blockquote>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script>
+    // Initialize Firebase with your config
+    // Replace with your Firebase project configuration
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+  </script>
+  
+  <script src="app.js"></script>
+  <script src="musicPlayer.js"></script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Paste-to-Playlist™ 🎶</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; max-width: 600px; margin: auto; }
+    input, button { padding: 0.5rem; margin-top: 0.5rem; width: 100%; }
+    #preview { margin-top: 1.5rem; border: 1px solid #ccc; padding: 1rem; border-radius: 8px; display: none; }
+  </style>
+</head>
+<body>
+
+  <h2>Paste-to-Playlist™ 🎶</h2>
+
+  <input type="text" id="roomInput" placeholder="Room Name (e.g. chill-vibes)" />
+  <input type="text" id="urlInput" placeholder="Paste Riffusion or MP3 link here..." />
+  <button onclick="generateTrack()">Generate Track</button>
+
+  <div id="preview">
+    <h3>Preview</h3>
+    <p><strong>Title:</strong> <span id="trackTitle"></span></p>
+    <p><strong>Artist:</strong> <span id="trackArtist"></span></p>
+    <p><strong>URL:</strong> <span id="trackUrl"></span></p>
+    <button onclick="addToPlaylist()">➕ Add to Playlist</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+    import { getFirestore, doc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "YOUR-KEY",
+      authDomain: "YOUR-DOMAIN",
+      projectId: "YOUR-ID",
+      storageBucket: "YOUR-BUCKET",
+      messagingSenderId: "YOUR-SENDER-ID",
+      appId: "YOUR-APP-ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let currentTrack = {};
+
+    window.generateTrack = () => {
+      const url = document.getElementById("urlInput").value.trim();
+      const isRiffusion = url.includes("riffusion.com/song/");
+      const trackId = url.split("/").pop();
+
+      currentTrack = {
+        id: "track-" + Math.random().toString(36).substring(2, 8),
+        title: isRiffusion ? `Riffusion Track (${trackId.slice(0, 6)})` : "Custom Track",
+        artist: isRiffusion ? "Riffusion AI" : "Unknown",
+        url: url,
+        duration: 180
+      };
+
+      document.getElementById("trackTitle").textContent = currentTrack.title;
+      document.getElementById("trackArtist").textContent = currentTrack.artist;
+      document.getElementById("trackUrl").textContent = currentTrack.url;
+      document.getElementById("preview").style.display = "block";
+    };
+
+    window.addToPlaylist = async () => {
+      const room = document.getElementById("roomInput").value.trim();
+      if (!room || !currentTrack.url) return alert("Missing room name or track!");
+
+      const roomRef = doc(db, "musicRooms", room);
+      await updateDoc(roomRef, {
+        playlist: arrayUnion(currentTrack)
+      });
+
+      alert(`Track "${currentTrack.title}" added to ${room}!`);
+      document.getElementById("preview").style.display = "none";
+    };
+  </script>
+
+</body>
+</html>

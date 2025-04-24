@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read access to music rooms for all users
+    match /musicRooms/{roomId} {
+      allow read: if true;
+      
+      // Only allow updates if:
+      // 1. The user is authenticated (optional, remove if you want to allow anonymous updates)
+      // 2. Only certain fields are being updated with valid values
+      allow write: if
+        // Uncomment the line below if you want to require authentication
+        // request.auth != null &&
+        
+        // Verify required fields exist in create/update
+        request.resource.data.keys().hasAll(['updatedAt']) &&
+        
+        // Validate the structure of the update
+        (
+          // If updating current track, ensure it has valid structure
+          !request.resource.data.keys().hasAny(['currentTrack']) ||
+          (request.resource.data.currentTrack == null || 
+           (request.resource.data.currentTrack is map && 
+            request.resource.data.currentTrack.keys().hasAll(['title', 'url'])))
+        ) &&
+        
+        // Validate isPlaying is a boolean
+        (
+          !request.resource.data.keys().hasAny(['isPlaying']) ||
+          request.resource.data.isPlaying is bool
+        ) &&
+        
+        // Validate position is a number
+        (
+          !request.resource.data.keys().hasAny(['position']) ||
+          request.resource.data.position is number
+        );
+    }
+    
+    // Additional rules for participants subcollection (if used)
+    match /musicRooms/{roomId}/participants/{userId} {
+      // Allow users to read all participants
+      allow read: if true;
+      
+      // Allow users to only write their own participant document
+      // Uncomment if you're using authentication
+      // allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // For anonymous access, allow all writes to participant documents
+      allow write: if true;
+    }
+    
+    // General rules for all other documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+} 
