@@ -1,3 +1,7 @@
+// Import Firebase configuration at the top of the file
+import app, { database } from '../src/firebase.js';
+import { ref, onValue, connectDatabaseEmulator } from 'firebase/database';
+
 let peer;
 let localStream;
 let connections = [];
@@ -101,26 +105,31 @@ function reconnect() {
 // Initialize Firebase and monitor connection state
 function initializeFirebase() {
   try {
-    // Check if firebase is already available
-    if (typeof firebase !== 'undefined' && firebase.firestore) {
-      // Monitor Firebase connection state if the functionality exists
-      if (firebase.database) {
-        const connectedRef = firebase.database().ref('.info/connected');
-        connectedRef.on('value', (snap) => {
-          firebaseConnected = snap.val() === true;
-          
-          if (!firebaseConnected) {
-            console.warn('Firebase disconnected');
-            updateConnectionStatus('reconnecting', 'Firebase connection lost. Reconnecting...');
-          } else if (connectionStatus !== 'connected' && peer && peer.id) {
-            console.log('Firebase reconnected');
-            updateConnectionStatus('connected', 'Connection restored');
-          }
-        });
+    // Connect to Firebase Realtime Database
+    const connectedRef = ref(database, '.info/connected');
+    
+    // Monitor connection state
+    onValue(connectedRef, (snap) => {
+      firebaseConnected = snap.val() === true;
+      
+      if (!firebaseConnected) {
+        console.warn('Firebase disconnected');
+        updateConnectionStatus('reconnecting', 'Firebase connection lost. Reconnecting...');
+      } else if (connectionStatus !== 'connected' && peer && peer.id) {
+        console.log('Firebase reconnected');
+        updateConnectionStatus('connected', 'Connection restored');
       }
-      return true;
+    });
+    
+    // Use emulator in development if specified in .env
+    if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR) {
+      const host = import.meta.env.VITE_FIREBASE_EMULATOR_HOST || 'localhost';
+      const port = import.meta.env.VITE_FIREBASE_EMULATOR_DATABASE_PORT || 9000;
+      console.log(`Using Firebase emulator at ${host}:${port}`);
+      connectDatabaseEmulator(database, host, port);
     }
-    return false;
+    
+    return true;
   } catch (err) {
     console.error('Firebase initialization error:', err);
     updateConnectionStatus('disconnected', 'Firebase connection error');
@@ -239,14 +248,14 @@ function joinRoom(isReconnect = false) {
       }
     }
     
+    // Mark as joined so reconnection knows to rejoin room
+    joined = true;
+    
     // If peer is already connected, complete joining the room
     if (peer.id) {
       completeRoomJoin(peer.id);
     }
     // Otherwise, the peer.on('open') handler will call completeRoomJoin
-    
-    // Mark as joined so reconnection knows to rejoin room
-    joined = true;
     
   }).catch((err) => {
     console.error("🚫 Mic access denied:", err);
@@ -258,6 +267,9 @@ function joinRoom(isReconnect = false) {
 // Complete room join process after peer connection is established
 function completeRoomJoin(peerId) {
   const room = document.getElementById("room").value.trim();
+  
+  // Update status to indicate we're connecting to the room
+  document.getElementById("status").innerText = `🎤 Connecting to "${room}"...`;
   
   fetch(`/join/${room}/${peerId}`, { method: 'POST' })
     .then(response => {
@@ -282,6 +294,17 @@ function completeRoomJoin(peerId) {
       });
       updatePeerCount(peers.length);
       
+      // Start listening for music sync events only after we've successfully joined the room
+      if (typeof listenToMusicSync === 'function') {
+        console.log(`Starting music sync listener for room: ${room}`);
+        unsubscribe = listenToMusicSync(room, (trackData) => {
+          console.log(`Received music sync data:`, trackData);
+          syncToTrack(trackData);
+        });
+      } else {
+        console.warn('listenToMusicSync function not available');
+      }
+      
       // Auto-open peer visualization if there are others in the room
       if (peers.length > 1) {
         setTimeout(updatePeersActivity, 1000);
@@ -290,24 +313,166 @@ function completeRoomJoin(peerId) {
       joinBtn.innerText = "Leave Room";
       joined = true;
       updateConnectionStatus('connected', `Joined room: ${room}`);
+      
+      // Join the music room if the function exists
+      if (typeof joinMusicRoom === 'function' && peer && peer.id) {
+        joinMusicRoom(room, peer.id)
+          .then(success => {
+            if (success) {
+              console.log(`Successfully joined music room: ${room}`);
+            } else {
+              console.warn(`Failed to join music room: ${room}`);
+            }
+          })
+          .catch(err => console.error('Error joining music room:', err));
+      }
     })
     .catch(err => {
       console.error("Failed to join room:", err);
       updateConnectionStatus('warning', `Failed to join room: ${err.message}`);
-      // Don't try to reconnect immediately on room join failure
     });
 }
 
 function leaveRoom() {
+  const room = document.getElementById("room").value.trim();
+  console.log(`Leaving room: ${room}`);
+  
+  // Leave the music room first if function exists
+  if (typeof leaveMusicRoom === 'function' && room && peer && peer.id) {
+    leaveMusicRoom(room, peer.id)
+      .then(success => {
+        console.log(`Music room left: ${success ? 'success' : 'failed'}`);
+      })
+      .catch(err => console.warn('Error leaving music room:', err));
+  }
+  
+  // Stop all Firebase listeners
+  stopAllListeners();
+  
+  // Clean up peer connections
   if (peer) {
     peer.destroy();
     peer = null;
   }
-  connections.forEach(conn => conn.close());
+  
+  // Close all media connections
+  connections.forEach(conn => {
+    if (conn && typeof conn.close === 'function') {
+      conn.close();
+    }
+  });
   connections = [];
+  
+  // Stop local media tracks
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+  
+  // Stop audio playback
+  if (audioPlayer) {
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+    
+    // Clear audio source
+    audioPlayer.src = '';
+    
+    // Update music title if available
+    const musicTitle = document.getElementById('musicTitle');
+    if (musicTitle) {
+      musicTitle.textContent = '';
+    }
+  }
+  
   document.getElementById("status").innerText = "👋 Left the room";
   joinBtn.innerText = "Join Room";
   joined = false;
+  
+  // Hide peer visualization
+  const peersContainer = document.getElementById('peersContainer');
+  if (peersContainer) {
+    peersContainer.style.display = 'none';
+  }
+}
+
+// Stop all active listeners
+function stopAllListeners() {
+  // Stop music sync listeners using the global unsubscribe function
+  if (unsubscribe && typeof unsubscribe === 'function') {
+    unsubscribe();
+    unsubscribe = null;
+    console.log('Unsubscribed from music sync');
+  }
+  
+  // Reset any Firebase-related variables
+  if (typeof resetMusicSync === 'function') {
+    resetMusicSync();
+  }
+}
+
+// Sync to the track data
+function syncToTrack(trackData) {
+  if (!trackData) return;
+  
+  console.log('Syncing to track:', trackData);
+  
+  try {
+    // Only update if we have the audio player
+    if (audioPlayer) {
+      // Update the source if needed
+      if (trackData.currentTrack && trackData.currentTrack.url && 
+          audioPlayer.src !== trackData.currentTrack.url) {
+        console.log(`Loading track: ${trackData.currentTrack.url}`);
+        audioPlayer.src = trackData.currentTrack.url;
+        
+        // Update music title if available
+        const musicTitle = document.getElementById('musicTitle');
+        if (musicTitle && trackData.currentTrack.title) {
+          musicTitle.textContent = trackData.currentTrack.title;
+        }
+      }
+      
+      // Sync play state
+      if (trackData.isPlaying && audioPlayer.paused) {
+        console.log('Playing track due to sync');
+        audioPlayer.play().catch(err => console.warn('Autoplay prevented:', err));
+      } else if (!trackData.isPlaying && !audioPlayer.paused) {
+        console.log('Pausing track due to sync');
+        audioPlayer.pause();
+      }
+      
+      // Sync position if needed
+      if (trackData.position !== undefined && trackData.updatedAt) {
+        const adjustedPosition = adjustPlaybackPosition(trackData.position, trackData.updatedAt);
+        
+        // Only seek if the difference is significant
+        const driftThreshold = 1; // 1 second threshold
+        if (Math.abs(audioPlayer.currentTime - adjustedPosition) > driftThreshold) {
+          console.log(`Adjusting position: ${audioPlayer.currentTime.toFixed(2)}s → ${adjustedPosition.toFixed(2)}s`);
+          audioPlayer.currentTime = adjustedPosition;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error during track sync:', err);
+  }
+}
+
+// Calculate adjusted playback position based on server timestamp and network latency
+function adjustPlaybackPosition(position, serverTimestamp) {
+  if (!serverTimestamp) return position;
+  
+  try {
+    const serverTime = serverTimestamp.toMillis ? serverTimestamp.toMillis() : serverTimestamp;
+    const currentTime = Date.now();
+    const elapsedSinceUpdate = (currentTime - serverTime - timeDifference) / 1000;
+    
+    // Add elapsed time since the server update to compensate for delay
+    return position + elapsedSinceUpdate;
+  } catch (err) {
+    console.error('Error adjusting playback position:', err);
+    return position;
+  }
 }
 
 function handleCall(call) {

@@ -104,13 +104,70 @@ export const getTimeDifference = (serverTimestamp) => {
 
 /**
  * Adjusts the playback position based on network latency and server time
- * @param {number} position - Current position from server
- * @param {number} timeDifference - Time difference between server and client
- * @param {number} latency - Estimated network latency in ms
- * @returns {number} - Adjusted playback position
+ * @param {number} serverPosition - The position reported by the server
+ * @param {boolean} isPlaying - Whether playback is currently active
+ * @param {number} serverTime - The timestamp when the server position was recorded
+ * @param {number} currentPosition - The current local playback position
+ * @param {number} threshold - The threshold in seconds to trigger a position adjustment (default: 2)
+ * @param {number} maxAdjustment - Maximum adjustment in seconds allowed (default: 10)
+ * @return {number} The adjusted position in seconds
  */
-export const adjustPlaybackPosition = (position, timeDifference, latency = 0) => {
-  // Convert ms to seconds for position adjustment
-  const adjustment = (timeDifference + latency) / 1000;
-  return position + adjustment;
+export const adjustPlaybackPosition = (serverPosition, isPlaying, serverTime, currentPosition, threshold = 2, maxAdjustment = 10) => {
+  // Validate inputs to prevent NaN errors
+  if (typeof serverPosition !== 'number' || isNaN(serverPosition) || 
+      typeof serverTime !== 'number' || isNaN(serverTime) ||
+      typeof currentPosition !== 'number' || isNaN(currentPosition)) {
+    console.error('Invalid inputs for adjustPlaybackPosition:', { serverPosition, serverTime, currentPosition });
+    return currentPosition;
+  }
+
+  // Calculate time elapsed since server update
+  const currentTime = Date.now();
+  const timeDifference = Math.max(0, (currentTime - serverTime) / 1000); // Convert to seconds, ensure non-negative
+  
+  // Calculate expected position based on server position and elapsed time
+  let expectedPosition = serverPosition;
+  if (isPlaying) {
+    // If track is playing, add elapsed time to server position
+    expectedPosition += timeDifference;
+  }
+  
+  // Calculate the difference between current and expected positions
+  const positionDifference = Math.abs(currentPosition - expectedPosition);
+  
+  // Log detailed debug info for significant differences
+  if (positionDifference > threshold / 2) {
+    console.log(`Position analysis:
+      - Server position: ${serverPosition.toFixed(2)}s
+      - Server time: ${new Date(serverTime).toISOString()}
+      - Time elapsed: ${timeDifference.toFixed(2)}s
+      - Expected position: ${expectedPosition.toFixed(2)}s
+      - Current position: ${currentPosition.toFixed(2)}s
+      - Difference: ${positionDifference.toFixed(2)}s`);
+  }
+  
+  // Only adjust if the difference exceeds the threshold
+  if (positionDifference > threshold) {
+    // Prevent excessive jumps by capping adjustment to maxAdjustment
+    if (positionDifference > maxAdjustment) {
+      console.warn(`Large position adjustment detected (${positionDifference.toFixed(2)}s). Limiting to ${maxAdjustment}s.`);
+      // Apply a partial adjustment in the right direction
+      const direction = expectedPosition > currentPosition ? 1 : -1;
+      return currentPosition + (direction * maxAdjustment);
+    }
+    
+    // For smaller adjustments, apply gradual sync with smoother transitions
+    if (positionDifference < threshold * 2) {
+      // Apply 50% of the adjustment for a smoother transition
+      const adjustedPosition = currentPosition + (expectedPosition - currentPosition) * 0.5;
+      console.log(`Smooth position adjustment: ${currentPosition.toFixed(2)}s → ${adjustedPosition.toFixed(2)}s`);
+      return adjustedPosition;
+    }
+    
+    // For medium adjustments, apply direct sync
+    console.log(`Position adjustment: ${currentPosition.toFixed(2)}s → ${expectedPosition.toFixed(2)}s`);
+    return expectedPosition;
+  }
+  
+  return currentPosition;
 }; 
