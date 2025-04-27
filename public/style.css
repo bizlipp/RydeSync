@@ -270,18 +270,19 @@ button:active {
   position: fixed;
   bottom: 0;
   left: 0;
-  width: 100%;
-  background: rgba(18, 26, 36, 0.95);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  right: 0;
+  background: var(--dark-surface);
+  border-top: 2px solid var(--primary);
   z-index: 1000;
-  border-top: 1px solid var(--primary);
-  height: 400px;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
 }
 
 #musicPlayer.collapsed {
-  transform: translateY(100%);
+  transform: translateY(calc(100% - 0px));
 }
 
 #togglePlayer {
@@ -297,6 +298,10 @@ button:active {
   box-shadow: 0 0 15px rgba(0, 174, 239, 0.4);
   z-index: 1001;
   font-size: 1.2rem;
+  display: flex !important; /* Force display to ensure visibility */
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
 }
 
 #togglePlayer:hover {

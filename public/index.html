@@ -178,7 +178,7 @@
   <p class="tagline">Where Vision Takes Flight</p>
 
   <input id="room" placeholder="Enter Room Name" autocomplete="off" />
-  <button id="joinBtn" onclick="joinRoom()">
+  <button id="joinBtn">
     <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3"/>
     </svg>
@@ -188,7 +188,7 @@
   <div id="musicSyncUI" style="text-align:center; margin-top:2rem;">
     <h3>🎵 Music Sync</h3>
     <input id="trackURL" placeholder="Paste track URL" style="width:60%" />
-    <button onclick="playTrack()">Play in Room</button>
+    <button id="playTrackBtn">Play in Room</button>
     <p style="font-size:0.8rem; margin-top:0.5rem; color:#666;">Uses the music player below for playback control</p>
   </div>
 
@@ -363,27 +363,12 @@
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   
-  <!-- Firebase SDKs -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-  <script>
-    // Initialize Firebase with your config
-    // Replace with your Firebase project configuration
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-  </script>
+  <!-- Load app JS as modules -->
+  <script type="module" src="main.js"></script>
+  <script type="module" src="app/app.js"></script>
+  <script type="module" src="app/musicPlayer.js"></script>
   
-  <script src="app.js"></script>
-  <script src="musicPlayer.js"></script>
+  <!-- Fallback message for browsers that don't support ES modules -->
+  <noscript>Your browser does not support JavaScript or ES Modules. Please use a modern browser.</noscript>
 </body>
 </html>

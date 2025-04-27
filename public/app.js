@@ -1,9 +1,13 @@
 // Import Firebase configuration at the top of the file
-import app, { database } from '../src/firebase.js';
-import { ref, onValue, connectDatabaseEmulator } from 'firebase/database';
+import app from './src/firebase.js';
+import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom } from './musicSync.js';
 
-let peer;
-let localStream;
+// Export joinRoom function for modular imports
+export { joinRoom };
+
+// Global variables for peer connectivity
+let peer = null;
+let localStream = null;
 let connections = [];
 let isMuted = false;
 const joinBtn = document.getElementById("joinBtn");
@@ -13,6 +17,78 @@ let maxReconnectAttempts = 10;
 let reconnectTimer = null;
 let connectionStatus = 'disconnected';
 let firebaseConnected = true;
+let joiningRoom = false; // Flag to prevent multiple simultaneous join attempts
+let audioContext = null; 
+let currentTrack = null;
+let roomTracks = {};
+let unsubscribe = null;
+
+// Debug flags for connection tracking
+const DEBUG_PEER_CONNECTIONS = true;
+const DEBUG_PEER_DATA = true;
+const DEBUG_ICE_CANDIDATES = false;  // More verbose connection negotiation logs
+
+/**
+ * Enhanced logging function for peer connections
+ * @param {string} message - Log message 
+ * @param {string} type - Connection event type
+ * @param {Object} data - Additional data to log
+ */
+function logPeerConnection(message, type = 'info', data = null) {
+  if (!DEBUG_PEER_CONNECTIONS) return;
+  
+  // Skip data connection logs if not enabled
+  if (type === 'data' && !DEBUG_PEER_DATA) return;
+  
+  // Skip ICE candidate logs if not enabled (very verbose)
+  if (type === 'ice' && !DEBUG_ICE_CANDIDATES) return;
+  
+  const timestamp = new Date().toISOString();
+  const icon = type === 'error' ? '❌' : type === 'warning' ? '⚠️' : type === 'data' ? '📦' : 
+               type === 'ice' ? '🧊' : type === 'media' ? '🎤' : '🔗';
+  
+  const prefix = `[Peer][${icon}][${timestamp}]`;
+  
+  if (data) {
+    console.log(`${prefix} ${message}`, data);
+  } else {
+    console.log(`${prefix} ${message}`);
+  }
+}
+
+// Peer connection metrics tracking
+const peerMetrics = {
+  connectionAttempts: 0,
+  successfulConnections: 0,
+  failedConnections: 0,
+  disconnections: 0,
+  reconnections: 0,
+  errors: [],
+  lastConnectionTime: null,
+  currentConnections: new Set(),
+  iceSuccesses: 0,
+  iceFails: 0,
+  callsInitiated: 0,
+  callsReceived: 0,
+  callsConnected: 0,
+  callsDropped: 0
+};
+
+// Reset peer connection metrics
+function resetPeerMetrics() {
+  Object.keys(peerMetrics).forEach(key => {
+    if (Array.isArray(peerMetrics[key])) {
+      peerMetrics[key] = [];
+    } else if (peerMetrics[key] instanceof Set) {
+      peerMetrics[key].clear();
+    } else if (typeof peerMetrics[key] === 'number') {
+      peerMetrics[key] = 0;
+    } else {
+      peerMetrics[key] = null;
+    }
+  });
+  logPeerConnection("Peer metrics reset");
+}
 
 // Create connection status UI
 const createConnectionStatusUI = () => {
@@ -105,28 +181,13 @@ function reconnect() {
 // Initialize Firebase and monitor connection state
 function initializeFirebase() {
   try {
-    // Connect to Firebase Realtime Database
-    const connectedRef = ref(database, '.info/connected');
-    
-    // Monitor connection state
-    onValue(connectedRef, (snap) => {
-      firebaseConnected = snap.val() === true;
-      
-      if (!firebaseConnected) {
-        console.warn('Firebase disconnected');
-        updateConnectionStatus('reconnecting', 'Firebase connection lost. Reconnecting...');
-      } else if (connectionStatus !== 'connected' && peer && peer.id) {
-        console.log('Firebase reconnected');
-        updateConnectionStatus('connected', 'Connection restored');
-      }
-    });
+    // We're using Firestore, not Realtime Database
+    console.log('Firebase initialized');
+    firebaseConnected = true;
     
     // Use emulator in development if specified in .env
     if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR) {
-      const host = import.meta.env.VITE_FIREBASE_EMULATOR_HOST || 'localhost';
-      const port = import.meta.env.VITE_FIREBASE_EMULATOR_DATABASE_PORT || 9000;
-      console.log(`Using Firebase emulator at ${host}:${port}`);
-      connectDatabaseEmulator(database, host, port);
+      console.log(`Using Firebase emulator in development mode`);
     }
     
     return true;
@@ -140,7 +201,11 @@ function initializeFirebase() {
 // Initialize PeerJS connection
 function initializePeer() {
   try {
+    logPeerConnection("Initializing PeerJS connection");
+    peerMetrics.connectionAttempts++;
+    
     if (peer) {
+      logPeerConnection("Destroying existing peer connection before creating new one", "warning", { peerId: peer.id });
       peer.destroy();
     }
     
@@ -158,12 +223,48 @@ function initializePeer() {
       }
     });
 
+    // Track detailed connection events
+    peer.on("open", (id) => {
+      console.log(`Peer connection established with ID: ${id}`);
+      document.getElementById("status").innerText = `🟢 Connected: ${id}`;
+      reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+      updateConnectionStatus('connected', 'Connection established');
+      
+      // Log success metrics
+      peerMetrics.successfulConnections++;
+      peerMetrics.lastConnectionTime = Date.now();
+      logPeerConnection(`Connection established with ID: ${id}`, "info", {
+        attempts: peerMetrics.connectionAttempts,
+        successes: peerMetrics.successfulConnections,
+        timeToConnect: peer._lastServerId ? `reconnect` : `new connection`
+      });
+      
+      // If we were trying to join a room, complete the process
+      if (joined) {
+        completeRoomJoin(id);
+      }
+    });
+
     peer.on("error", (error) => {
       console.error("❌ Peer error:", error);
       document.getElementById("status").innerText = `⚠️ Error: ${error.type}`;
       
+      // Track error metrics
+      peerMetrics.errors.push({
+        time: Date.now(),
+        type: error.type,
+        message: error.message
+      });
+      
+      logPeerConnection(`Connection error: ${error.type}`, "error", { 
+        error: error.message,
+        errorCount: peerMetrics.errors.length,
+        peerId: peer.id
+      });
+      
       // Handle specific errors
       if (error.type === 'network' || error.type === 'disconnected' || error.type === 'server-error') {
+        peerMetrics.failedConnections++;
         updateConnectionStatus('disconnected', `Connection lost: ${error.type}`);
         reconnect();
       } else if (error.type === 'peer-unavailable') {
@@ -172,22 +273,17 @@ function initializePeer() {
       }
     });
 
-    peer.on("open", (id) => {
-      console.log(`Peer connection established with ID: ${id}`);
-      document.getElementById("status").innerText = `🟢 Connected: ${id}`;
-      reconnectAttempts = 0; // Reset reconnect attempts on successful connection
-      updateConnectionStatus('connected', 'Connection established');
-      
-      // If we were trying to join a room, complete the process
-      if (joined) {
-        completeRoomJoin(id);
-      }
-    });
-
     peer.on("disconnected", () => {
       console.warn("Peer disconnected from server");
       document.getElementById("status").innerText = "⚠️ Connection to server lost";
       updateConnectionStatus('disconnected', 'Connection to server lost');
+      peerMetrics.disconnections++;
+      
+      logPeerConnection("Disconnected from signaling server", "warning", {
+        disconnections: peerMetrics.disconnections,
+        connectionLifetime: peerMetrics.lastConnectionTime ? 
+          `${((Date.now() - peerMetrics.lastConnectionTime) / 1000).toFixed(1)}s` : 'unknown'
+      });
       
       // Try to reconnect
       peer.reconnect();
@@ -195,6 +291,7 @@ function initializePeer() {
       // If reconnection fails, start our custom reconnect process
       setTimeout(() => {
         if (peer.disconnected) {
+          logPeerConnection("Automatic reconnect failed, starting manual reconnect", "warning");
           reconnect();
         }
       }, 5000);
@@ -204,30 +301,97 @@ function initializePeer() {
       console.warn("Peer connection closed");
       document.getElementById("status").innerText = "🚫 Connection closed";
       updateConnectionStatus('disconnected', 'Connection closed');
+      logPeerConnection("Connection closed", "warning", {
+        connectionStats: {
+          successfulConnections: peerMetrics.successfulConnections,
+          disconnections: peerMetrics.disconnections,
+          callsConnected: peerMetrics.callsConnected,
+          callsDropped: peerMetrics.callsDropped
+        }
+      });
     });
     
-    // Set up call handler
+    // Set up call handler with enhanced logging
     peer.on("call", call => {
+      peerMetrics.callsReceived++;
+      logPeerConnection(`Received call from peer: ${call.peer}`, "media", {
+        callsReceived: peerMetrics.callsReceived
+      });
+      
       if (localStream) {
         call.answer(localStream);
+        
+        // Track call connection events
+        call.on("stream", () => {
+          peerMetrics.callsConnected++;
+          peerMetrics.currentConnections.add(call.peer);
+          logPeerConnection(`Media connection established with: ${call.peer}`, "media", {
+            activeCalls: peerMetrics.currentConnections.size
+          });
+        });
+        
+        call.on("close", () => {
+          peerMetrics.callsDropped++;
+          peerMetrics.currentConnections.delete(call.peer);
+          logPeerConnection(`Call with ${call.peer} ended`, "media", {
+            remainingCalls: peerMetrics.currentConnections.size,
+            droppedCalls: peerMetrics.callsDropped
+          });
+        });
+        
+        call.on("error", (err) => {
+          logPeerConnection(`Call error with ${call.peer}: ${err.type}`, "error", {
+            error: err
+          });
+        });
+        
         handleCall(call);
+      } else {
+        logPeerConnection(`Couldn't answer call - no local stream available`, "warning");
       }
     });
+    
+    // Connection quality monitoring through ICE events
+    if (DEBUG_ICE_CANDIDATES) {
+      peer.on('iceStateChanged', (state) => {
+        logPeerConnection(`ICE connection state changed: ${state}`, "ice");
+        
+        if (state === 'connected') {
+          peerMetrics.iceSuccesses++;
+        } else if (state === 'failed' || state === 'disconnected') {
+          peerMetrics.iceFails++;
+        }
+      });
+    }
     
     return true;
   } catch (err) {
     console.error("Peer initialization error:", err);
     updateConnectionStatus('disconnected', 'Connection initialization failed');
+    logPeerConnection(`Critical initialization error: ${err.message}`, "error", { error: err });
+    peerMetrics.failedConnections++;
     return false;
   }
 }
 
 function joinRoom(isReconnect = false) {
+  console.log('joinRoom function called, isReconnect:', isReconnect);
+  
+  // Prevent multiple join attempts
+  if (joiningRoom) {
+    console.warn('Already joining a room, ignoring duplicate join request');
+    return;
+  }
+  
   const room = document.getElementById("room").value.trim();
+  console.log('Room value:', room);
   if (!room) {
     if (!isReconnect) alert("Enter a room name");
     return;
   }
+
+  // Set joining flag to prevent multiple calls
+  joiningRoom = true;
 
   // If already joined and not a reconnection attempt, leave first
   if (joined && !isReconnect) {
@@ -244,6 +408,7 @@ function joinRoom(isReconnect = false) {
     if (!peer || peer.destroyed) {
       const initialized = initializePeer();
       if (!initialized) {
+        joiningRoom = false; // Reset flag on error
         throw new Error("Failed to initialize peer connection");
       }
     }
@@ -261,6 +426,7 @@ function joinRoom(isReconnect = false) {
     console.error("🚫 Mic access denied:", err);
     document.getElementById("status").innerText = "🚫 Please allow mic access";
     updateConnectionStatus('warning', 'Microphone access denied');
+    joiningRoom = false; // Reset flag on error
   });
 }
 
@@ -295,15 +461,11 @@ function completeRoomJoin(peerId) {
       updatePeerCount(peers.length);
       
       // Start listening for music sync events only after we've successfully joined the room
-      if (typeof listenToMusicSync === 'function') {
-        console.log(`Starting music sync listener for room: ${room}`);
-        unsubscribe = listenToMusicSync(room, (trackData) => {
-          console.log(`Received music sync data:`, trackData);
-          syncToTrack(trackData);
-        });
-      } else {
-        console.warn('listenToMusicSync function not available');
-      }
+      console.log(`Starting music sync listener for room: ${room}`);
+      unsubscribe = listenToMusicSync(room, (trackData) => {
+        console.log(`Received music sync data:`, trackData);
+        syncToTrack(trackData);
+      });
       
       // Auto-open peer visualization if there are others in the room
       if (peers.length > 1) {
@@ -314,8 +476,8 @@ function completeRoomJoin(peerId) {
       joined = true;
       updateConnectionStatus('connected', `Joined room: ${room}`);
       
-      // Join the music room if the function exists
-      if (typeof joinMusicRoom === 'function' && peer && peer.id) {
+      // Join the music room
+      if (peer && peer.id) {
         joinMusicRoom(room, peer.id)
           .then(success => {
             if (success) {
@@ -324,12 +486,20 @@ function completeRoomJoin(peerId) {
               console.warn(`Failed to join music room: ${room}`);
             }
           })
-          .catch(err => console.error('Error joining music room:', err));
+          .catch(err => console.error('Error joining music room:', err))
+          .finally(() => {
+            // Reset the joiningRoom flag once complete
+            joiningRoom = false;
+          });
+      } else {
+        // Reset the joiningRoom flag if we can't join the music room
+        joiningRoom = false;
       }
     })
     .catch(err => {
       console.error("Failed to join room:", err);
       updateConnectionStatus('warning', `Failed to join room: ${err.message}`);
+      joiningRoom = false; // Reset flag on error
     });
 }
 
@@ -337,8 +507,11 @@ function leaveRoom() {
   const room = document.getElementById("room").value.trim();
   console.log(`Leaving room: ${room}`);
   
-  // Leave the music room first if function exists
-  if (typeof leaveMusicRoom === 'function' && room && peer && peer.id) {
+  // Reset the joining flag when leaving
+  joiningRoom = false;
+  
+  // Leave the music room first
+  if (room && peer && peer.id) {
     leaveMusicRoom(room, peer.id)
       .then(success => {
         console.log(`Music room left: ${success ? 'success' : 'failed'}`);
@@ -404,10 +577,8 @@ function stopAllListeners() {
     console.log('Unsubscribed from music sync');
   }
   
-  // Reset any Firebase-related variables
-  if (typeof resetMusicSync === 'function') {
-    resetMusicSync();
-  }
+  // Reset Firebase-related variables
+  resetMusicSync();
 }
 
 // Sync to the track data
@@ -475,8 +646,16 @@ function adjustPlaybackPosition(position, serverTimestamp) {
   }
 }
 
+// Handle peer call with enhanced logging
 function handleCall(call) {
+  logPeerConnection(`Setting up call with ${call.peer}`, "media");
+  
   call.on("stream", remoteStream => {
+    logPeerConnection(`Received stream from ${call.peer}`, "media", { 
+      audioTracks: remoteStream.getAudioTracks().length,
+      videoTracks: remoteStream.getVideoTracks().length
+    });
+    
     const audio = document.createElement("audio");
     audio.srcObject = remoteStream;
     audio.autoplay = true;
@@ -497,6 +676,11 @@ function handleCall(call) {
   call.on("error", (err) => {
     console.error("❌ Call error:", err);
     document.getElementById("status").innerText = `⚠️ Call error: ${err.type}`;
+    logPeerConnection(`Call error with ${call.peer}: ${err.type}`, "error", { error: err });
+  });
+  
+  call.on("close", () => {
+    logPeerConnection(`Call with ${call.peer} closed`, "media");
   });
 }
 
@@ -979,11 +1163,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeFirebase();
   initializePeer();
   
-  // Add connection status to any join buttons
-  if (joinBtn) {
-    joinBtn.addEventListener('click', () => joinRoom());
-  }
-  
   // Set up peer activity visualization
   setupPeerVisualization();
 });
@@ -1144,4 +1323,17 @@ function stringToColor(str) {
   }
   
   return color;
+}
+
+// Export peer connection health for diagnostic purposes
+function getPeerConnectionHealth() {
+  return {
+    ...peerMetrics,
+    currentPeerId: peer ? peer.id : null,
+    isConnected: peer ? !peer.disconnected : false,
+    connectionCount: peerMetrics.currentConnections.size,
+    currentConnections: Array.from(peerMetrics.currentConnections),
+    uptime: peerMetrics.lastConnectionTime ? 
+      (Date.now() - peerMetrics.lastConnectionTime) / 1000 : 0
+  };
 }

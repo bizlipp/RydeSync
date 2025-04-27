@@ -7,38 +7,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
     
-    // Music room rules
+    // Music rooms - Public read, only authenticated write
     match /musicRooms/{roomId} {
-      // Anyone can read music room data
       allow read: if true;
-      
-      // Allow creation with valid data structure
-      allow create: if request.auth != null || request.time < timestamp.date(2025, 12, 31);
-      
-      // Allow updates with proper validation
-      allow update: if (request.auth != null && 
-                        (resource.data.createdBy == request.auth.uid || 
-                         resource.data.participants.hasAny([request.auth.uid]))) || 
-                      request.time < timestamp.date(2025, 12, 31);
-      
-      // Allow deletion only by creator or if room is empty
-      allow delete: if (request.auth != null && 
-                      resource.data.createdBy == request.auth.uid) || 
-                    (resource.data.participants.size() == 0) || 
-                    request.time < timestamp.date(2025, 12, 31);
+      allow write: if request.auth != null;
     }
     
-    // Additional rules for participants subcollection (if used)
-    match /musicRooms/{roomId}/participants/{userId} {
-      // Allow users to read all participants
-      allow read: if true;
-      
-      // Allow users to only write their own participant document
-      // Uncomment if you're using authentication
-      // allow write: if request.auth != null && request.auth.uid == userId;
-      
-      // For anonymous access, allow all writes to participant documents
-      allow write: if true;
+    // Participants - Only authenticated can read/write
+    match /participants/{participantId} {
+      allow read, write: if request.auth != null;
     }
   }
 } 

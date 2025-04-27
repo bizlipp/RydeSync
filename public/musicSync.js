@@ -1,421 +1,709 @@
-// public/musicSync.js
-// Firebase Firestore integration for music synchronization
+// Music Synchronization Module for RydeSync
+// Handles music room state synchronization using Firestore
 
-import app, { db as firestoreDb } from '../src/firebase.js';
+// Import the necessary Firebase modules and the initialized db instance
 import { 
-  collection, doc, getDoc, setDoc, updateDoc, 
-  arrayUnion, arrayRemove, serverTimestamp, deleteDoc, onSnapshot 
-} from 'firebase/firestore';
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  onSnapshot, 
+  arrayUnion, 
+  arrayRemove, 
+  serverTimestamp 
+} from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { db } from "./src/firebase.js";
 
-// Global variables for music sync
-let musicSyncUnsubscribe = null;
-let currentRoomRef = null;
-let currentUserId = null;
-let syncActive = false;
-let lastSyncTime = 0;
-let timeDifference = 0;
-let latency = 0;
+// Debug flags
+const DEBUG_MODE = true;
+const DEBUG_LISTENERS = true;
+const DEBUG_SYNC = true;
+
+// Log levels
+const LOG_LEVELS = {
+  INFO: 'INFO',
+  WARNING: 'WARNING',
+  ERROR: 'ERROR',
+  LISTENER: 'LISTENER',
+  SYNC: 'SYNC'
+};
+
+// Firestore instance - no longer needed, using imported db
+// const db = getFirestore();
+
+// Active listeners (map of roomId -> unsubscribe function)
+const activeListeners = {};
+
+// Track total number of listeners for debugging
+let totalListenerCount = 0;
+
+// Change detection state to prevent feedback loops
+const syncState = {
+  // Track last synced values per room to detect real changes
+  lastSyncedValues: new Map(),
+  // Minimum change thresholds
+  positionThreshold: 2, // seconds - ignore smaller position changes
+  // Track updates we triggered to avoid reacting to our own changes
+  ourUpdates: new Set()
+};
+
+// Connection state tracking
+const connectionState = {
+  activeRooms: new Set(),
+  listenerCount: 0,
+  lastActivity: Date.now(),
+  initialized: false
+};
+
+// Cache update timestamps to limit update frequency
+const updateThrottling = {
+  lastPositionUpdate: {},  // roomId -> timestamp
+  lastPlaybackStateUpdate: {},  // roomId -> timestamp
+  positionUpdateInterval: 5000,  // 5 seconds
+  playbackStateUpdateInterval: 1000,  // 1 second
+  trackUpdateInterval: 500  // 0.5 seconds
+};
 
 /**
- * Join a music synchronization room
- * @param {string} roomId - The ID of the room to join
- * @param {string} userId - The ID of the user joining the room
- * @returns {Promise<boolean>} - Returns true if joining was successful
+ * Enhanced logging function for music sync
+ * @param {string} message - Log message
+ * @param {string} level - Log level
+ * @param {Object} data - Additional data to log
  */
-async function joinMusicRoom(roomId, userId) {
-  try {
-    if (!roomId || !userId) {
-      console.error('Room ID and User ID are required to join a music room');
-      return false;
-    }
+function log(message, level = LOG_LEVELS.INFO, data = null) {
+  if (!DEBUG_MODE) return;
+  
+  if ((level === LOG_LEVELS.LISTENER && !DEBUG_LISTENERS) || 
+      (level === LOG_LEVELS.SYNC && !DEBUG_SYNC)) {
+    return;
+  }
+  
+  const timestamp = new Date().toISOString();
+  const prefix = `[MusicSync][${level}][${timestamp}]`;
+  
+  if (data) {
+    console.log(`${prefix} ${message}`, data);
+  } else {
+    console.log(`${prefix} ${message}`);
+  }
+  
+  // Update connection state
+  connectionState.lastActivity = Date.now();
+}
 
-    console.log(`Joining music room ${roomId} as ${userId}`);
+/**
+ * Log connection-specific events
+ * @param {string} message - Connection message
+ * @param {Object} data - Connection data
+ */
+function logConnection(message, data = null) {
+  log(message, LOG_LEVELS.CONNECTION, data);
+}
 
-    // Check if the room exists
-    const roomRef = doc(firestoreDb, 'musicRooms', roomId);
-    const roomDoc = await getDoc(roomRef);
+/**
+ * Firestore schema for music rooms:
+ * - createdAt: timestamp when the room was created
+ * - updatedAt: timestamp when the room was last updated
+ * - currentTrack: object containing current track info (url, title, artist, etc.)
+ * - isPlaying: boolean indicating if playback is active
+ * - currentPosition: number indicating current playback position in seconds
+ * - playlist: array of track objects for the room's playlist
+ * - participants: array of user IDs currently in the room
+ */
 
-    if (!roomDoc.exists()) {
-      console.log(`Room ${roomId} doesn't exist, creating it`);
-      // Create the room if it doesn't exist
-      await setDoc(roomRef, {
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdBy: userId,
-        participants: [userId],
-        currentTrack: null,
-        position: 0,
-        isPlaying: false
-      });
-    } else {
-      // Room exists, update participants list
-      const roomData = roomDoc.data();
-      const participants = roomData.participants || [];
-      
-      // Check if user is already in the room
-      if (!participants.includes(userId)) {
-        await updateDoc(roomRef, {
-          updatedAt: serverTimestamp(),
-          participants: arrayUnion(userId)
-        });
-      }
-    }
-
-    // Set current room ID for future operations
-    currentRoomRef = roomRef;
-    currentUserId = userId;
+/**
+ * Join a music room
+ * @param {string} roomId - ID of the room to join
+ * @param {string} userId - ID of the user joining
+ * @param {boolean} asLeader - Whether this user should be set as the room leader
+ * @returns {Promise<object>} Room data
+ */
+export async function joinMusicRoom(roomId, userId, asLeader = false) {
+  if (!roomId || !userId) {
+    throw new Error("Room ID and User ID are required");
+  }
+  
+  logConnection(`Joining music room ${roomId} as user ${userId}`, { asLeader });
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  const roomSnap = await getDoc(roomRef);
+  
+  if (roomSnap.exists()) {
+    // Room exists, add participant
+    const roomData = roomSnap.data();
+    log(`Joining existing room: ${roomId}`, LOG_LEVELS.INFO, roomData);
     
-    return true;
-  } catch (error) {
-    console.error('Error joining music room:', error);
-    return false;
+    // Update the participants list and leader if needed
+    const updateData = {
+      participants: arrayUnion(userId),
+      updatedAt: serverTimestamp()
+    };
+    
+    // Set as leader if requested and there's no leader
+    if (asLeader && !roomData.leader) {
+      updateData.leader = userId;
+    }
+    
+    await updateDoc(roomRef, updateData);
+    connectionState.activeRooms.add(roomId);
+    
+    return { ...roomData, id: roomId };
+  } else {
+    // Room doesn't exist, create it
+    log(`Creating new room: ${roomId}`, LOG_LEVELS.INFO);
+    const newRoomData = {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      currentTrack: null,
+      isPlaying: false,
+      currentPosition: 0,
+      playlist: [],
+      participants: [userId],
+      leader: asLeader ? userId : null
+    };
+    
+    await setDoc(roomRef, newRoomData);
+    connectionState.activeRooms.add(roomId);
+    
+    return { ...newRoomData, id: roomId };
   }
 }
 
 /**
- * Leave a music synchronization room
- * @param {string} roomId - The ID of the room to leave
- * @param {string} userId - The ID of the user leaving the room
- * @param {boolean} cleanupResources - Whether to also clean up Firebase listeners
- * @returns {Promise<boolean>} - Returns true if leaving was successful
+ * Leave a music room
+ * @param {string} roomId - ID of the room to leave
+ * @param {string} userId - ID of the user leaving
+ * @returns {Promise<void>}
  */
-async function leaveMusicRoom(roomId, userId, cleanupResources = false) {
-  try {
-    if (!roomId || !userId) {
-      console.error('Room ID and User ID are required to leave a music room');
-      return false;
-    }
-
-    console.log(`Leaving music room ${roomId} as ${userId}`);
-
-    // Check if the room exists
-    const roomRef = doc(firestoreDb, 'musicRooms', roomId);
-    const roomDoc = await getDoc(roomRef);
-
-    if (!roomDoc.exists()) {
-      console.warn(`Room ${roomId} doesn't exist, nothing to leave`);
-      // Reset current room variables
-      if (cleanupResources) {
-        resetMusicSync();
-      }
-      return true;
-    }
-
-    // Get room data
-    const roomData = roomDoc.data();
-    const participants = roomData.participants || [];
-
-    // Remove user from participants list
-    if (participants.includes(userId)) {
-      // Filter out the current user
-      const updatedParticipants = participants.filter(id => id !== userId);
-
-      if (updatedParticipants.length === 0) {
-        // If no participants left, delete the room
-        console.log(`No participants left in room ${roomId}, deleting it`);
-        await deleteDoc(roomRef);
-      } else {
-        // Update room with new participants list
-        await updateDoc(roomRef, {
-          updatedAt: serverTimestamp(),
-          participants: arrayRemove(userId)
-        });
-      }
-    }
-
-    // Clean up resources if requested
-    if (cleanupResources) {
-      resetMusicSync();
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error leaving music room:', error);
-    return false;
+export async function leaveMusicRoom(roomId, userId) {
+  if (!roomId || !userId) {
+    throw new Error("Room ID and User ID are required");
   }
+  
+  logConnection(`Leaving music room ${roomId} as user ${userId}`);
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  const roomSnap = await getDoc(roomRef);
+  
+  if (!roomSnap.exists()) {
+    log(`Room ${roomId} not found`, LOG_LEVELS.WARNING);
+    return;
+  }
+  
+  const roomData = roomSnap.data();
+  
+  // Remove from participants
+  await updateDoc(roomRef, {
+    participants: arrayRemove(userId),
+    updatedAt: serverTimestamp()
+  });
+  
+  // If this user was the leader, pick a new leader if there are other participants
+  if (roomData.leader === userId && roomData.participants.length > 1) {
+    // Get other participants (excluding the leaving user)
+    const otherParticipants = roomData.participants.filter(p => p !== userId);
+    if (otherParticipants.length > 0) {
+      // Select the first remaining participant as the new leader
+      await updateDoc(roomRef, {
+        leader: otherParticipants[0]
+      });
+      
+      log(`New leader assigned: ${otherParticipants[0]}`, LOG_LEVELS.INFO);
+    }
+  }
+  
+  // Unsubscribe from active listener if it exists
+  if (activeListeners[roomId]) {
+    logConnection(`Unsubscribing from room ${roomId} listener`);
+    activeListeners[roomId]();
+    delete activeListeners[roomId];
+    connectionState.listenerCount--;
+    totalListenerCount--;
+  }
+  
+  connectionState.activeRooms.delete(roomId);
+  log(`Left room ${roomId}`, LOG_LEVELS.INFO);
 }
 
 /**
- * Listen for changes to a music synchronization room
- * @param {string} roomId - The ID of the room to listen to
- * @param {function} callback - Callback function for room updates
- * @returns {function} - Unsubscribe function to stop listening
+ * Listen to music sync updates for a room
+ * @param {string} roomId - ID of the room to listen to
+ * @param {function} callback - Callback function to run when data changes
+ * @returns {function} Unsubscribe function
  */
-function listenToMusicSync(roomId, callback) {
+export function listenToMusicSync(roomId, callback) {
   if (!roomId || typeof callback !== 'function') {
-    console.error('Room ID and callback function are required');
-    return () => {}; // Empty unsubscribe function
+    throw new Error("Room ID and callback function are required");
   }
-
-  // Setup listener for the room document
-  const roomRef = doc(firestoreDb, 'musicRooms', roomId);
   
-  // Add error handling and reconnection logic
-  let retryCount = 0;
-  let unsubscribe = null;
+  logConnection(`Setting up listener for room ${roomId}`);
   
-  const setupListener = () => {
-    try {
-      unsubscribe = onSnapshot(roomRef, (doc) => {
-        retryCount = 0; // Reset retry count on successful update
+  // Initialize change detection for this room if needed
+  if (!syncState.lastSyncedValues.has(roomId)) {
+    syncState.lastSyncedValues.set(roomId, {
+      currentTrack: null,
+      isPlaying: false,
+      currentPosition: 0,
+      lastSyncTime: 0
+    });
+  }
+  
+  // Unsubscribe from existing listener for this room if it exists
+  if (activeListeners[roomId]) {
+    logConnection(`Replacing existing listener for room ${roomId}`);
+    activeListeners[roomId]();
+    connectionState.listenerCount--;
+    totalListenerCount--;
+  }
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
+  // Add a flag to track first snapshot
+  let firstRoomSnapshot = true;
+  
+  // Debounce settings
+  const DEBOUNCE_DELAY = 1000; // 1 second
+  let pendingCallback = null;
+  let lastProcessedTime = 0;
+  
+  // Set up real-time listener with metadata filtering to reduce unnecessary updates
+  const unsubscribe = onSnapshot(
+    roomRef, 
+    { includeMetadataChanges: false }, // Only trigger on actual document changes, not metadata
+    (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        const now = Date.now();
+        const lastValues = syncState.lastSyncedValues.get(roomId);
         
-        if (!doc.exists()) {
-          console.warn(`Music room ${roomId} no longer exists`);
-          callback(null); // Signal that room was deleted
+        // Handle first snapshot specifically to avoid "double join" effect
+        if (firstRoomSnapshot) {
+          firstRoomSnapshot = false;
+          
+          // Only process initial snapshot if it contains meaningful data
+          if (!data.currentTrack && (!data.participants || data.participants.length <= 1)) {
+            log(`📭 Ignoring initial empty Firestore snapshot for room ${roomId}`, LOG_LEVELS.SYNC);
+            return;
+          }
+          log(`Processing initial snapshot with meaningful data for room ${roomId}`, LOG_LEVELS.SYNC);
+        }
+        
+        // Get update ID if this was from our update (to avoid loops)
+        const updateId = data.updateId || null;
+        const isOurUpdate = updateId && syncState.ourUpdates.has(updateId);
+        
+        if (isOurUpdate) {
+          // This is an update we triggered, delete it from our tracking set
+          // and skip processing to avoid feedback loops
+          syncState.ourUpdates.delete(updateId);
+          log(`Skipping our own update (ID: ${updateId})`, LOG_LEVELS.SYNC);
           return;
         }
         
-        const roomData = doc.data();
-        callback(roomData);
-      }, (error) => {
-        console.error('Error listening to music room:', error);
+        // Detect meaningful changes - with improved track change detection
+        const oldTrackUrl = lastValues.currentTrack?.url || null;
+        const newTrackUrl = data.currentTrack?.url || null;
         
-        // Try to reconnect with exponential backoff
-        if (retryCount < 5) {
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
-          retryCount++;
+        // Only consider track changed if:
+        // - URLs are different
+        // - AND at least one of them is not null (avoid null → null "changes")
+        const trackChanged = oldTrackUrl !== newTrackUrl && (oldTrackUrl !== null || newTrackUrl !== null);
+        
+        const playingChanged = data.isPlaying !== lastValues.isPlaying;
+        
+        const positionSignificantlyChanged = 
+          Math.abs((data.currentPosition || 0) - (lastValues.currentPosition || 0)) > syncState.positionThreshold;
+        
+        // Enforce minimum time between processing position updates (5 seconds)
+        const timeThresholdMet = (now - lastValues.lastSyncTime) > 5000;
+        
+        // Only process updates if they're meaningful 
+        if (trackChanged || playingChanged || (positionSignificantlyChanged && timeThresholdMet)) {
+          // Implement deep debouncing to prevent rapid-fire updates
+          // Clear any pending callback timeout
+          if (pendingCallback) {
+            clearTimeout(pendingCallback);
+          }
           
-          console.log(`Retrying connection in ${delay/1000} seconds (attempt ${retryCount}/5)`);
-          setTimeout(() => {
-            if (unsubscribe) {
-              unsubscribe(); // Clean up previous listener
-              unsubscribe = null;
-            }
-            setupListener();
-          }, delay);
+          // If we've processed a callback recently, debounce this one
+          if (now - lastProcessedTime < DEBOUNCE_DELAY) {
+            log(`Debouncing update for room ${roomId} (too frequent)`, LOG_LEVELS.SYNC, {
+              timeSinceLastProcessed: now - lastProcessedTime,
+              debounceDelay: DEBOUNCE_DELAY
+            });
+            
+            // Set timeout to process after debounce period
+            pendingCallback = setTimeout(() => {
+              log(`Processing debounced update for room ${roomId}`, LOG_LEVELS.SYNC, {
+                trackChanged,
+                playingChanged, 
+                positionChanged: positionSignificantlyChanged,
+                secondsSinceLastSync: (now - lastValues.lastSyncTime) / 1000
+              });
+              
+              // Update our last synced values
+              syncState.lastSyncedValues.set(roomId, {
+                currentTrack: data.currentTrack,
+                isPlaying: data.isPlaying,
+                currentPosition: data.currentPosition,
+                lastSyncTime: now
+              });
+              
+              // Mark the time we processed this callback
+              lastProcessedTime = Date.now();
+              
+              // Invoke callback with room data
+              callback({ ...data, id: roomId });
+            }, DEBOUNCE_DELAY);
+            
+            return;
+          }
+          
+          logConnection(`Processing meaningful change for room ${roomId}`, {
+            trackChanged,
+            playingChanged,
+            positionChanged: positionSignificantlyChanged,
+            secondsSinceLastSync: (now - lastValues.lastSyncTime) / 1000
+          });
+          
+          // Update our last synced values
+          syncState.lastSyncedValues.set(roomId, {
+            currentTrack: data.currentTrack,
+            isPlaying: data.isPlaying,
+            currentPosition: data.currentPosition,
+            lastSyncTime: now
+          });
+          
+          // Mark the time we processed this callback
+          lastProcessedTime = now;
+          
+          // Invoke callback with room data
+          callback({ ...data, id: roomId });
+        } else {
+          // Log that we're skipping a non-meaningful update
+          log(`Skipping non-meaningful update for room ${roomId}`, LOG_LEVELS.SYNC, {
+            positionDiff: Math.abs((data.currentPosition || 0) - (lastValues.currentPosition || 0)),
+            secondsSinceLastSync: (now - lastValues.lastSyncTime) / 1000
+          });
         }
-      });
-    } catch (error) {
-      console.error('Failed to set up listener:', error);
+      } else {
+        log(`Room ${roomId} does not exist`, LOG_LEVELS.WARNING);
+        callback(null);
+      }
+    },
+    (error) => {
+      log(`Error listening to room ${roomId}: ${error.message}`, LOG_LEVELS.ERROR, error);
+      // Auto-cleanup on error
+      if (activeListeners[roomId]) {
+        delete activeListeners[roomId];
+        connectionState.listenerCount--;
+        totalListenerCount--;
+      }
+      callback(null, error);
     }
-  };
+  );
   
-  setupListener();
+  // Store unsubscribe function
+  activeListeners[roomId] = unsubscribe;
+  connectionState.listenerCount++;
+  totalListenerCount++;
   
-  // Return unsubscribe function
-  return () => {
-    if (unsubscribe) {
-      unsubscribe();
-    }
-  };
-}
-
-/**
- * Reset all music sync variables
- */
-function resetMusicSync() {
-  currentRoomRef = null;
-  currentUserId = null;
-  
-  // If there's a Firebase subscription active, unsubscribe
-  if (typeof musicSyncUnsubscribe === 'function') {
-    musicSyncUnsubscribe();
-    musicSyncUnsubscribe = null;
+  // Track connection state
+  if (!connectionState.initialized) {
+    connectionState.initialized = true;
+    log("Music sync connection initialized", LOG_LEVELS.CONNECTION, {
+      timestamp: Date.now(),
+      activeListeners: connectionState.listenerCount
+    });
   }
+  
+  logConnection(`Active listeners: ${connectionState.listenerCount} (Total: ${totalListenerCount})`, {
+    rooms: Array.from(connectionState.activeRooms)
+  });
+  
+  // Return a wrapped unsubscribe function that also maintains our count
+  return () => {
+    logConnection(`Manually unsubscribing from room ${roomId}`);
+    
+    if (activeListeners[roomId]) {
+      // Call the original unsubscribe function
+      activeListeners[roomId]();
+      
+      // Clean up our tracking
+      delete activeListeners[roomId];
+      connectionState.listenerCount--;
+      totalListenerCount--;
+      
+      // Clean up our change detection state
+      syncState.lastSyncedValues.delete(roomId);
+      
+      logConnection(`Listener removed. Active listeners: ${connectionState.listenerCount} (Total: ${totalListenerCount})`);
+    }
+  };
+}
+
+// Generate a unique update ID
+function generateUpdateId() {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /**
- * Send current track information to the room
- * @param {string} roomName - The name of the room
- * @param {Object} trackInfo - Information about the track
+ * Update the current track in a music room
+ * @param {string} roomId - ID of the room
+ * @param {object} trackData - Track data object containing at least url and title
  * @returns {Promise<void>}
  */
-async function updateCurrentTrack(roomName, trackInfo) {
-  if (!roomName || !trackInfo) {
-    console.error('Invalid parameters for updateCurrentTrack');
-    return Promise.reject(new Error('Invalid parameters'));
+export async function updateCurrentTrack(roomId, trackData) {
+  if (!roomId || !trackData || !trackData.url) {
+    throw new Error("Room ID and track data (with url) are required");
   }
   
+  const now = Date.now();
+  
+  // Throttle track updates
+  if (updateThrottling.lastTrackUpdate && 
+      updateThrottling.lastTrackUpdate[roomId] && 
+      now - updateThrottling.lastTrackUpdate[roomId] < updateThrottling.trackUpdateInterval) {
+    log(`Throttling track update for room ${roomId} (too frequent)`, LOG_LEVELS.INFO);
+    return;
+  }
+  
+  updateThrottling.lastTrackUpdate = updateThrottling.lastTrackUpdate || {};
+  updateThrottling.lastTrackUpdate[roomId] = now;
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
   try {
-    console.log(`Updating current track in room ${roomName}:`, trackInfo);
+    // Generate a unique update ID to track our changes
+    const updateId = generateUpdateId();
+    syncState.ourUpdates.add(updateId);
     
-    // Always use 'musicRooms' collection
-    const roomRef = doc(firestoreDb, 'musicRooms', roomName);
-    
-    // Create room if it doesn't exist
-    await setDoc(roomRef, {
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-    
-    // Update the current track
     await updateDoc(roomRef, {
-      currentTrack: trackInfo,
-      isPlaying: true,
-      position: 0,
-      updatedAt: serverTimestamp()
+      currentTrack: trackData,
+      updatedAt: serverTimestamp(),
+      updateId: updateId
     });
     
-    console.log('Track successfully updated in Firestore');
-    return Promise.resolve();
+    log(`Track updated in room ${roomId}`, LOG_LEVELS.INFO, trackData);
   } catch (error) {
-    console.error('Error updating current track:', error);
-    return Promise.reject(error);
+    log(`Error updating track: ${error.message}`, LOG_LEVELS.ERROR, error);
+    throw error;
   }
 }
 
 /**
  * Update the playback state (playing/paused)
- * @param {string} roomName - The name of the room
- * @param {boolean} isPlaying - Whether the track is playing
- * @param {number} position - Current position in seconds
+ * @param {string} roomId - ID of the room
+ * @param {boolean} isPlaying - Whether playback is active
+ * @param {number} currentPosition - Current playback position in seconds
  * @returns {Promise<void>}
  */
-async function updatePlaybackState(roomName, isPlaying, position) {
-  if (!roomName) {
-    console.error('Invalid room name for updatePlaybackState');
-    return Promise.reject(new Error('Invalid room name'));
+export async function updatePlaybackState(roomId, isPlaying, currentPosition) {
+  if (!roomId || typeof isPlaying !== 'boolean' || typeof currentPosition !== 'number') {
+    throw new Error("Room ID, isPlaying state, and currentPosition are required");
   }
   
+  const now = Date.now();
+  
+  // Don't throttle pause events, but do throttle play events
+  if (isPlaying && 
+      updateThrottling.lastPlaybackStateUpdate && 
+      updateThrottling.lastPlaybackStateUpdate[roomId] && 
+      now - updateThrottling.lastPlaybackStateUpdate[roomId] < updateThrottling.playbackStateUpdateInterval) {
+    log(`Throttling play state update for room ${roomId} (too frequent)`, LOG_LEVELS.INFO);
+    return;
+  }
+  
+  updateThrottling.lastPlaybackStateUpdate = updateThrottling.lastPlaybackStateUpdate || {};
+  updateThrottling.lastPlaybackStateUpdate[roomId] = now;
+  updateThrottling.lastPositionUpdate = updateThrottling.lastPositionUpdate || {};
+  updateThrottling.lastPositionUpdate[roomId] = now;
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
   try {
-    console.log(`Updating playback state in room ${roomName}: ${isPlaying ? 'playing' : 'paused'} at ${position}s`);
+    // Generate a unique update ID to track our changes
+    const updateId = generateUpdateId();
+    syncState.ourUpdates.add(updateId);
     
-    // Always use 'musicRooms' collection
-    const roomRef = doc(firestoreDb, 'musicRooms', roomName);
-    
-    // Update the playback state
     await updateDoc(roomRef, {
       isPlaying: isPlaying,
-      position: position,
-      updatedAt: serverTimestamp()
+      currentPosition: currentPosition,
+      updatedAt: serverTimestamp(),
+      updateId: updateId
     });
     
-    console.log('Playback state successfully updated');
-    return Promise.resolve();
+    log(`Playback state updated in room ${roomId}`, LOG_LEVELS.INFO, {
+      isPlaying, currentPosition
+    });
   } catch (error) {
-    console.error('Error updating playback state:', error);
-    return Promise.reject(error);
+    log(`Error updating playback state: ${error.message}`, LOG_LEVELS.ERROR, error);
+    throw error;
   }
 }
 
 /**
- * Measure network latency and time difference with the server
- * @param {Object} roomRef - Firestore document reference
- * @returns {Promise<Object>} Time difference and latency
+ * Update just the playback position
+ * @param {string} roomId - ID of the room
+ * @param {number} currentPosition - Current playback position in seconds
+ * @returns {Promise<void>}
  */
-async function measureNetworkLatency(roomRef) {
+export async function updatePlaybackPosition(roomId, currentPosition) {
+  if (!roomId || typeof currentPosition !== 'number') {
+    throw new Error("Room ID and currentPosition are required");
+  }
+  
+  const now = Date.now();
+  
+  // Throttle position updates
+  if (updateThrottling.lastPositionUpdate && 
+      updateThrottling.lastPositionUpdate[roomId] && 
+      now - updateThrottling.lastPositionUpdate[roomId] < updateThrottling.positionUpdateInterval) {
+    if (DEBUG_MODE) {
+      log(`Throttling position update for room ${roomId} (too frequent)`, LOG_LEVELS.INFO);
+    }
+    return;
+  }
+  
+  updateThrottling.lastPositionUpdate = updateThrottling.lastPositionUpdate || {};
+  updateThrottling.lastPositionUpdate[roomId] = now;
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
   try {
-    const startTime = Date.now();
+    // Generate a unique update ID to track our changes
+    const updateId = generateUpdateId();
+    syncState.ourUpdates.add(updateId);
     
-    // Send a timestamp to the server
     await updateDoc(roomRef, {
-      clientTime: startTime,
-      updatedAt: serverTimestamp()
+      currentPosition: currentPosition,
+      updatedAt: serverTimestamp(),
+      updateId: updateId
     });
     
-    // Get the server timestamp
-    const snapshot = await getDoc(roomRef);
-    const data = snapshot.data();
-    const endTime = Date.now();
-    
-    if (data && data.updatedAt) {
-      const serverTime = data.updatedAt.toMillis();
-      const roundTripTime = endTime - startTime;
-      const pingLatency = roundTripTime / 2; // Estimated one-way latency
-      
-      // Calculate time difference (server time - client time - one-way latency)
-      const difference = serverTime - endTime;
-      
-      return { difference, pingLatency };
+    if (DEBUG_MODE) {
+      log(`Position updated in room ${roomId}: ${currentPosition.toFixed(2)}s`, LOG_LEVELS.INFO);
     }
-    
-    throw new Error('Server timestamp not available');
   } catch (error) {
-    console.error('Error measuring network latency:', error);
-    return { difference: 0, pingLatency: 0 };
+    log(`Error updating playback position: ${error.message}`, LOG_LEVELS.ERROR, error);
+    throw error;
   }
 }
 
 /**
- * Get music room data
- * @param {string} roomId - Room identifier
- * @returns {Promise<object|null>} Room data or null
+ * Add a track to the room's playlist
+ * @param {string} roomId - ID of the room
+ * @param {object} trackData - Track data to add
+ * @returns {Promise<void>}
+ */
+export async function addTrackToPlaylist(roomId, trackData) {
+  if (!roomId || !trackData || !trackData.url) {
+    throw new Error("Room ID and track data (with url) are required");
+  }
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
+  try {
+    await updateDoc(roomRef, {
+      playlist: arrayUnion(trackData),
+      updatedAt: serverTimestamp()
+    });
+    
+    log(`Track added to playlist in room ${roomId}`, LOG_LEVELS.INFO, trackData);
+  } catch (error) {
+    log(`Error adding track to playlist: ${error.message}`, LOG_LEVELS.ERROR, error);
+    throw error;
+  }
+}
+
+/**
+ * Get the current data for a music room
+ * @param {string} roomId - ID of the room
+ * @returns {Promise<object|null>} Room data or null if room doesn't exist
  */
 export async function getMusicRoomData(roomId) {
+  if (!roomId) {
+    throw new Error("Room ID is required");
+  }
+  
+  const roomRef = doc(db, "musicRooms", roomId);
+  
   try {
-    const roomRef = doc(firestoreDb, 'musicRooms', roomId);
-    const docSnap = await getDoc(roomRef);
+    const roomSnap = await getDoc(roomRef);
     
-    if (docSnap.exists()) {
-      return docSnap.data();
+    if (roomSnap.exists()) {
+      const data = roomSnap.data();
+      return { ...data, id: roomId };
+    } else {
+      log(`Room ${roomId} not found`, LOG_LEVELS.WARNING);
+      return null;
     }
-    
-    return null;
   } catch (error) {
-    console.error('Error getting music room data:', error);
-    return null;
+    log(`Error getting room data: ${error.message}`, LOG_LEVELS.ERROR, error);
+    throw error;
   }
 }
 
 /**
- * Add track to room playlist
- * @param {string} roomId - Room to update
- * @param {Object} track - Track info to add
- * @returns {Promise<boolean>}
+ * Get connection health statistics
+ * @returns {Object} Connection health metrics
  */
-export async function addTrackToPlaylist(roomId, track) {
-  try {
-    const roomRef = doc(firestoreDb, 'musicRooms', roomId);
-    
-    // Check if playlist exists
-    const roomDoc = await getDoc(roomRef);
-    if (!roomDoc.exists()) {
-      return false;
-    }
-    
-    const roomData = roomDoc.data();
-    let playlist = roomData.playlist || [];
-    
-    // Add track to playlist
-    playlist.push(track);
-    
-    // Update document
-    await updateDoc(roomRef, {
-      playlist: playlist,
-      updatedAt: new Date()
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('Error adding track to playlist:', error);
-    return false;
-  }
+export function getConnectionHealth() {
+  return {
+    activeRooms: Array.from(connectionState.activeRooms),
+    listenerCount: connectionState.listenerCount,
+    totalListenerCount,
+    lastActivity: connectionState.lastActivity,
+    timeSinceLastActivity: Date.now() - connectionState.lastActivity,
+    isHealthy: connectionState.initialized && connectionState.listenerCount > 0
+  };
 }
 
 /**
- * Alias for updateCurrentTrack
- * Compatible with older code that might still use sessionId
+ * Reset all music sync state and listeners
+ * Clear active listeners and reset connection state
  */
-export const updateMusicRoom = async (roomId, data) => {
-  try {
-    await updateDoc(doc(firestoreDb, 'musicRooms', roomId), {
-      ...data,
-      updatedAt: new Date()
-    });
-    return true;
-  } catch (error) {
-    console.error('Error updating music room:', error);
-    return false;
-  }
-};
+export function resetMusicSync() {
+  log('Resetting music sync module', LOG_LEVELS.INFO);
+  
+  // Clean up all active listeners
+  Object.keys(activeListeners).forEach(roomId => {
+    if (typeof activeListeners[roomId] === 'function') {
+      log(`Unsubscribing from room ${roomId} listener`, LOG_LEVELS.LISTENER);
+      activeListeners[roomId]();
+      delete activeListeners[roomId];
+    }
+  });
+  
+  // Clear our updates tracking set
+  syncState.ourUpdates.clear();
+  
+  // Clear all change detection state
+  syncState.lastSyncedValues.clear();
+  
+  // Reset connection state
+  connectionState.activeRooms.clear();
+  connectionState.listenerCount = 0;
+  totalListenerCount = 0;
+  connectionState.lastActivity = Date.now();
+  
+  log('Music sync module reset complete', LOG_LEVELS.INFO, {
+    activeListeners: Object.keys(activeListeners).length,
+    activeRooms: connectionState.activeRooms.size,
+    listenerCount: totalListenerCount
+  });
+}
 
-/**
- * Alias for getMusicRoomData
- * Compatible with older code that might still use sessionId
- */
-export const getMusicRoom = getMusicRoomData;
-
-// Export functions for use in other modules
-window.listenToMusicSync = listenToMusicSync;
-window.unsubscribeMusicSync = function() {
-  if (musicSyncUnsubscribe) {
-    musicSyncUnsubscribe();
-    musicSyncUnsubscribe = null;
-    syncActive = false;
-    currentRoomRef = null;
-  }
-};
-window.updateCurrentTrack = updateCurrentTrack;
-window.updatePlaybackState = updatePlaybackState; 
-window.joinMusicRoom = joinMusicRoom;
-window.leaveMusicRoom = leaveMusicRoom;
-window.resetMusicSync = resetMusicSync; 
+// Export the module
+export default {
+  joinMusicRoom,
+  leaveMusicRoom,
+  listenToMusicSync,
+  updateCurrentTrack,
+  updatePlaybackState,
+  updatePlaybackPosition,
+  addTrackToPlaylist,
+  getMusicRoomData,
+  getConnectionHealth,
+  resetMusicSync
+}; 

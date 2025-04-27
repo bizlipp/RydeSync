@@ -1,12 +1,12 @@
-import { db } from './firebase.js';
-import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '/src/firebase.js';
+import { doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { 
   joinMusicRoom, 
   listenToMusicSync, 
   updateCurrentTrack,
   updatePlaybackState,
   addTrackToPlaylist
-} from './musicSync.js';
+} from '/public/musicSync.js';
 
 // ======================================
 // EXAMPLE: How to use Firebase for music sync

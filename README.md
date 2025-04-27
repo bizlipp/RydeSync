@@ -41,22 +41,27 @@ A stylish, lightweight, and secure P2P voice communication platform built for re
    cd rydesync
    ```
 
-2. Install dependencies
+2. Create a `.env` file in the project root with your Firebase configuration:
+
+```
+# Firebase Configuration
+VITE_FIREBASE_API_KEY=YOUR_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN=YOUR_PROJECT.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=YOUR_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET=YOUR_PROJECT.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=YOUR_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID=YOUR_APP_ID
+
+# Environment
+NODE_ENV=development
+```
+
+3. Install dependencies
    ```bash
    npm install
    ```
 
-3. Create a `.env` file based on `.env.example`
-   ```bash
-   cp .env.example .env
-   ```
-
-4. (Optional) Set up Firebase for music synchronization
-   - Create a Firebase project at [firebase.google.com](https://firebase.google.com)
-   - Enable Firestore and Firebase Realtime Database
-   - Add your Firebase config to the script in `public/index.html`
-
-5. Start the development server
+4. Start the development server
    ```bash
    npm run dev
    ```
@@ -198,3 +203,29 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 Built with ❤️ by AeroVista LLC – Where Vision Takes Flight 
+
+## Important Notes
+
+- Scripts must be loaded as ES modules (with `type="module"` attribute)
+- Environment variables must be set for Firebase configuration
+- Firebase security rules should be properly configured for production use
+
+## Troubleshooting
+
+### Module Loading Issues
+
+If you see `Uncaught SyntaxError: Cannot use import statement outside a module`, make sure all scripts are loaded with `type="module"` in your HTML:
+
+```html
+<script type="module" src="app.js"></script>
+<script type="module" src="musicPlayer.js"></script>
+<script type="module" src="musicSync.js"></script>
+```
+
+### Firebase Configuration
+
+If Firebase fails to initialize, check your `.env` file and ensure all required environment variables are set correctly.
+
+## License
+
+MIT – use it, remix it, Ryde with it. 
