@@ -48,6 +48,38 @@ let reconnectTimer = null;
 let connectionStatus = 'disconnected';
 let firebaseConnected = true;
 
+// Initialize application components
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('Initializing RydeSync application components from app.js');
+  
+  // Initialize core media controls
+  initMediaControls();
+  
+  // Initialize Firebase services
+  initializeFirebase();
+  
+  // Initialize PeerJS connection
+  initializePeer();
+});
+
+/**
+ * Initialize all media control components
+ */
+function initMediaControls() {
+  // Initialize playlist manager for music player
+  const playlistInitialized = initPlaylistManager();
+  
+  // Initialize volume control for audio
+  const volumeInitialized = initVolumeControl();
+  
+  if (DEBUG_MODE) {
+    console.log(`🎵 Playlist manager initialization: ${playlistInitialized ? '✅ Success' : '❌ Failed'}`);
+    console.log(`🔊 Volume control initialization: ${volumeInitialized ? '✅ Success' : '❌ Failed'}`);
+  }
+  
+  return playlistInitialized && volumeInitialized;
+}
+
 // Create connection status UI
 const createConnectionStatusUI = () => {
   // Create connection status display if it doesn't exist
@@ -355,6 +387,12 @@ function performRoomJoin(room, peerId, stream) {
         document.getElementById("status").innerText = `🟢 Joined room: ${room}`;
         document.getElementById("joinBtn").disabled = false;
         
+        // Show leave button, hide join button
+        const joinBtn = document.getElementById("joinBtn");
+        const leaveBtn = document.getElementById("leaveBtn");
+        if (joinBtn) joinBtn.style.display = "none";
+        if (leaveBtn) leaveBtn.style.display = "inline-block";
+        
         // Update peer count display
         updatePeerCount(peers.length);
         
@@ -486,6 +524,12 @@ function leaveRoom() {
     // Update UI
     document.getElementById("status").innerText = "Leaving room...";
     document.getElementById("controls").style.display = "none";
+    
+    // Show join button, hide leave button
+    const joinBtn = document.getElementById("joinBtn");
+    const leaveBtn = document.getElementById("leaveBtn");
+    if (joinBtn) joinBtn.style.display = "inline-block";
+    if (leaveBtn) leaveBtn.style.display = "none";
     
     // Leave the music room
     if (window.peer && window.peer.id) {
@@ -977,58 +1021,3 @@ function stringToColor(str) {
   const h = hash % 360;
   return `hsl(${h}, 70%, 40%)`;
 }
-
-// Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 Initializing application...');
-  
-  // Initialize Firebase
-  initializeFirebase();
-  
-  // Initialize Peer connection
-  initializePeer();
-  
-  // Initialize the playlist manager
-  if (initPlaylistManager()) {
-    console.log('✅ Playlist manager initialized');
-  } else {
-    console.error('❌ Failed to initialize playlist manager');
-  }
-  
-  // Initialize volume controls
-  if (initVolumeControl()) {
-    console.log('✅ Volume controls initialized');
-  } else {
-    console.warn('⚠️ Volume controls not available');
-  }
-  
-  // Initialize peer visualization
-  setupPeerVisualization();
-  
-  // Set up the playTrackBtn click event
-  const playTrackBtn = document.getElementById('playTrackBtn');
-  if (playTrackBtn) {
-    playTrackBtn.addEventListener('click', () => {
-      const roomInput = document.getElementById('room');
-      const trackUrlInput = document.getElementById('trackURL');
-      
-      if (!roomInput || !roomInput.value.trim()) {
-        alert('Please enter a room name first');
-        return;
-      }
-      
-      if (!trackUrlInput || !trackUrlInput.value.trim()) {
-        alert('Please enter a track URL');
-        return;
-      }
-      
-      const roomName = roomInput.value.trim();
-      const trackUrl = trackUrlInput.value.trim();
-      
-      console.log(`Play track button clicked: ${trackUrl} in room ${roomName}`);
-      
-      // Call the syncToTrack function
-      syncToTrack({ url: trackUrl, room: roomName });
-    });
-  }
-});
