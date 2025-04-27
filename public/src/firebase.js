@@ -14,11 +14,14 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+const db = getFirestore(app);
 
 // Development warning for insecure rules
 if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
   console.log("✅ Using actual Firebase config");
 }
 
+console.log("Firebase Ready");
+
+export { db };
 export default app; 

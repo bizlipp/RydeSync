@@ -345,9 +345,17 @@ button:active {
 
 /* Drag and drop styling */
 #playerBody.drag-over {
+  border: 2px dashed var(--primary);
   background: rgba(0, 174, 239, 0.1);
-  outline: 2px dashed var(--primary);
-  outline-offset: -10px;
+  box-shadow: 0 0 25px rgba(0, 174, 239, 0.3);
+  animation: pulseDragTarget 1.5s infinite alternate;
+  transform: scale(1.02);
+  transition: all 0.3s ease;
+}
+
+@keyframes pulseDragTarget {
+  0% { box-shadow: 0 0 15px rgba(0, 174, 239, 0.2); }
+  100% { box-shadow: 0 0 30px rgba(0, 174, 239, 0.5); }
 }
 
 #playerBody.drag-over::after {
