@@ -1,5 +1,5 @@
 // Music Player Module for RydeSync
-import { joinMusicRoom, updateCurrentTrack, updatePlaybackState, updatePlaybackPosition } from '../musicSync.js';
+import { joinMusicRoom, updateCurrentTrack, updatePlaybackState, updatePlaybackPosition } from '../../musicSync.js';
 
 // Export the required functions
 export { 
@@ -67,11 +67,15 @@ async function playTrack(roomName, trackUrl) {
     if (audioPlayer) {
       audioPlayer.src = trackInfo.url;
       audioPlayer.load();
-      try {
-        await audioPlayer.play();
-      } catch (playError) {
-        console.warn('Could not autoplay track:', playError);
-      }
+      
+      // Remove any previous canplaythrough listener if needed
+      audioPlayer.addEventListener('canplaythrough', () => {
+        console.log('✅ Audio ready, attempting to play.');
+        audioPlayer.play().catch(err => {
+          console.warn('⚠️ Autoplay failed. Waiting for user interaction.', err);
+          // Optional: Show a manual "Click to Play" button if you want
+        });
+      }, { once: true });
     }
     
     // Show notification
@@ -501,11 +505,23 @@ function playCurrentTrack() {
   
   if (!audioPlayer) return;
   
+  // Hide player until loaded
+  audioPlayer.style.visibility = 'hidden';
+  
   // Set audio source and play
   audioPlayer.src = currentTrack._objectUrl;
-  audioPlayer.play().catch(err => {
-    console.warn("Audio playback failed:", err);
-  });
+  audioPlayer.load();
+
+  // Remove any previous canplaythrough listener if needed
+  audioPlayer.addEventListener('canplaythrough', () => {
+    console.log('✅ Audio ready, attempting to play.');
+    // Show player now that it's ready
+    audioPlayer.style.visibility = 'visible';
+    audioPlayer.play().catch(err => {
+      console.warn('⚠️ Autoplay failed. Waiting for user interaction.', err);
+      // Optional: Show a manual "Click to Play" button if you want
+    });
+  }, { once: true });
   
   // Update play/pause button
   if (playPauseBtn) playPauseBtn.textContent = "⏸";

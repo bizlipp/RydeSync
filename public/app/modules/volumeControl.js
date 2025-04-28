@@ -1,196 +1,139 @@
 /**
- * volumeControl.js
- * Handles audio volume controls and mute functionality
+ * Volume Control Module for RydeSync
+ * Handles audio volume control and mute functionality
  */
 
-// DOM elements
-const domElements = {
-  audioPlayer: null,
-  volumeSlider: null,
-  muteButton: null
-};
-
-// Volume state
-const volumeState = {
-  previousVolume: 1.0, // Store previous volume for unmute
-  isMuted: false
-};
+// Module state
+let isMuted = false;
+let lastVolume = 1.0;
 
 /**
- * Initialize volume control functionality
- * @returns {boolean} True if initialized successfully
+ * Initialize volume control components
+ * @returns {boolean} Success status
  */
 export function initVolumeControl() {
-  // Get DOM elements
-  domElements.audioPlayer = document.getElementById("audioPlayer");
-  domElements.volumeSlider = document.getElementById("volume");
-  domElements.muteButton = document.getElementById("muteBtn");
-
-  // Validate essential elements
-  if (!domElements.audioPlayer) {
-    console.error("Audio player element not found");
-    return false;
-  }
-
-  if (!domElements.volumeSlider || !domElements.muteButton) {
-    console.warn("Volume control elements not found, volume control disabled");
-    return false;
-  }
-
-  // Set initial volume from slider
-  if (domElements.volumeSlider && domElements.audioPlayer) {
-    domElements.audioPlayer.volume = domElements.volumeSlider.value / 100;
-    volumeState.previousVolume = domElements.audioPlayer.volume;
-  }
-
-  // Setup event listeners
-  setupEventListeners();
-  
-  console.log("Volume control initialized");
-  return true;
-}
-
-/**
- * Setup volume control event listeners
- */
-function setupEventListeners() {
-  const { audioPlayer, volumeSlider, muteButton } = domElements;
-
-  // Volume slider change
-  if (volumeSlider) {
-    volumeSlider.addEventListener("input", () => {
+  try {
+    const volumeSlider = document.getElementById('volume');
+    const muteBtn = document.getElementById('muteBtn');
+    
+    if (!volumeSlider || !muteBtn) {
+      console.warn('Volume control elements not found');
+      return false;
+    }
+    
+    // Set initial volume from slider
+    setVolume(volumeSlider.value / 100);
+    
+    // Add event listeners
+    volumeSlider.addEventListener('input', () => {
       const newVolume = volumeSlider.value / 100;
       setVolume(newVolume);
       
-      // If we adjust volume above 0, we're implicitly unmuting
-      if (newVolume > 0 && volumeState.isMuted) {
-        toggleMute();
+      // If volume is set to 0, update mute button state
+      if (newVolume === 0) {
+        muteBtn.textContent = 'Unmute';
+        isMuted = true;
+      } else if (isMuted) {
+        muteBtn.textContent = 'Mute';
+        isMuted = false;
       }
     });
-  }
-
-  // Mute button click
-  if (muteButton) {
-    muteButton.addEventListener("click", () => {
+    
+    muteBtn.addEventListener('click', () => {
       toggleMute();
+      muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+      muteBtn.classList.toggle('muted', isMuted);
     });
-  }
-
-  // Listen for changes to mute state from other sources
-  if (audioPlayer) {
-    audioPlayer.addEventListener("volumechange", () => {
-      updateMuteButtonUI();
-    });
+    
+    console.log('Volume controls initialized');
+    return true;
+  } catch (error) {
+    console.error('Error initializing volume controls:', error);
+    return false;
   }
 }
 
 /**
- * Set the audio volume
- * @param {number} volume - Volume level (0 to 1)
+ * Set the volume level for all audio elements
+ * @param {number} level - Volume level between 0 and 1
  */
-export function setVolume(volume) {
-  const { audioPlayer, volumeSlider } = domElements;
-  
-  if (!audioPlayer) return;
-  
-  // Clamp volume between 0 and 1
-  const clampedVolume = Math.max(0, Math.min(1, volume));
-  
-  // Update audio player volume
-  audioPlayer.volume = clampedVolume;
-  
-  // Update slider position if available
-  if (volumeSlider) {
-    volumeSlider.value = clampedVolume * 100;
+export function setVolume(level) {
+  if (level < 0 || level > 1) {
+    console.warn('Volume level must be between 0 and 1');
+    level = Math.max(0, Math.min(1, level));
   }
   
-  // Store as previous volume if it's not zero
-  if (clampedVolume > 0) {
-    volumeState.previousVolume = clampedVolume;
+  // Store last non-zero volume for unmute
+  if (level > 0) {
+    lastVolume = level;
   }
   
-  // Update UI state
-  updateMuteButtonUI();
+  // Apply volume to all peer audio elements
+  const audioElements = document.querySelectorAll('audio');
+  audioElements.forEach(audio => {
+    audio.volume = level;
+  });
+  
+  // Update volume slider if it exists
+  const volumeSlider = document.getElementById('volume');
+  if (volumeSlider && volumeSlider.value !== Math.round(level * 100)) {
+    volumeSlider.value = Math.round(level * 100);
+  }
 }
 
 /**
- * Toggle mute state
+ * Toggle mute state for all audio elements
  * @returns {boolean} New mute state
  */
 export function toggleMute() {
-  const { audioPlayer } = domElements;
+  const volumeSlider = document.getElementById('volume');
   
-  if (!audioPlayer) return false;
-  
-  if (volumeState.isMuted) {
-    // Unmute - restore previous volume
-    audioPlayer.volume = volumeState.previousVolume;
-    volumeState.isMuted = false;
-  } else {
-    // Mute - store current volume and set to 0
-    if (audioPlayer.volume > 0) {
-      volumeState.previousVolume = audioPlayer.volume;
+  if (isMuted) {
+    // Unmute
+    setVolume(lastVolume);
+    if (volumeSlider) {
+      volumeSlider.value = Math.round(lastVolume * 100);
     }
-    audioPlayer.volume = 0;
-    volumeState.isMuted = true;
+    isMuted = false;
+    
+    // Unmute the microphone stream
+    if (window.localStream) {
+      window.localStream.getAudioTracks().forEach(track => {
+        track.enabled = true;
+      });
+    }
+  } else {
+    // Mute
+    if (volumeSlider) {
+      lastVolume = volumeSlider.value / 100;
+      volumeSlider.value = 0;
+    }
+    setVolume(0);
+    isMuted = true;
+    
+    // Mute the microphone stream
+    if (window.localStream) {
+      window.localStream.getAudioTracks().forEach(track => {
+        track.enabled = false;
+      });
+    }
   }
   
-  updateMuteButtonUI();
-  return volumeState.isMuted;
+  return isMuted;
 }
 
 /**
- * Update mute button UI to reflect current state
+ * Get current mute state
+ * @returns {boolean} Current mute state
  */
-function updateMuteButtonUI() {
-  const { audioPlayer, muteButton, volumeSlider } = domElements;
-  
-  if (!audioPlayer || !muteButton) return;
-  
-  const isMuted = audioPlayer.volume === 0;
-  volumeState.isMuted = isMuted;
-  
-  // Update button text/icon
-  if (isMuted) {
-    muteButton.innerHTML = `
-      <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-        <line x1="2" y1="2" x2="22" y2="22" stroke-width="2"/>
-      </svg>
-      Unmute
-    `;
-    muteButton.classList.add("muted");
-  } else {
-    muteButton.innerHTML = `
-      <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-      </svg>
-      Mute
-    `;
-    muteButton.classList.remove("muted");
-  }
-  
-  // Update slider position
-  if (volumeSlider) {
-    volumeSlider.value = audioPlayer.volume * 100;
-  }
+export function isMutedState() {
+  return isMuted;
 }
 
 /**
  * Get current volume level
- * @returns {number} Current volume (0 to 1)
+ * @returns {number} Current volume level between 0 and 1
  */
-export function getVolume() {
-  const { audioPlayer } = domElements;
-  return audioPlayer ? audioPlayer.volume : 0;
-}
-
-/**
- * Check if audio is currently muted
- * @returns {boolean} Mute state
- */
-export function isMuted() {
-  return volumeState.isMuted;
+export function getCurrentVolume() {
+  return isMuted ? 0 : lastVolume;
 } 

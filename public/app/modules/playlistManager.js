@@ -15,7 +15,6 @@ const domElements = {
   clearPlaylistBtn: null,
   playerBody: null,
   loadMusicBtn: null,
-  musicFilesInput: null,
   togglePlayerBtn: null,
   musicPlayer: null
 };
@@ -43,7 +42,6 @@ export function initPlaylistManager() {
   domElements.clearPlaylistBtn = document.getElementById("clearPlaylist");
   domElements.playerBody = document.getElementById("playerBody");
   domElements.loadMusicBtn = document.getElementById("loadMusic");
-  domElements.musicFilesInput = document.getElementById("musicFiles");
   domElements.togglePlayerBtn = document.getElementById("togglePlayer");
   domElements.musicPlayer = document.getElementById("musicPlayer");
 
@@ -69,7 +67,6 @@ function setupEventListeners() {
     musicPlayer,
     togglePlayerBtn,
     loadMusicBtn,
-    musicFilesInput,
     playPauseBtn,
     nextTrackBtn,
     prevTrackBtn,
@@ -114,87 +111,87 @@ function setupEventListeners() {
     togglePlayerBtn.setAttribute("title", isCollapsed ? "Hide Music Player" : "Show Music Player");
   });
 
-  // Add touch gestures for mobile expand/collapse
-  if (musicPlayer) {
-    let touchStart = null;
-    let touchY = null;
-    
-    musicPlayer.addEventListener('touchstart', (e) => {
-      touchStart = e.touches[0].clientY;
-      touchY = touchStart;
-    }, { passive: true });
-    
-    musicPlayer.addEventListener('touchmove', (e) => {
-      touchY = e.touches[0].clientY;
-      const diff = touchY - touchStart;
-      if (Math.abs(diff) > 10) {
-        e.preventDefault();
-        musicPlayer.style.transform = `translateY(${diff}px)`;
-      }
-    }, { passive: false });
-    
-    musicPlayer.addEventListener('touchend', () => {
-      const diff = touchY - touchStart;
-      if (diff < -50) {
-        // Swipe up - expand player
-        musicPlayer.classList.remove('collapsed');
-        togglePlayerBtn.textContent = "▼";
-        togglePlayerBtn.setAttribute("title", "Hide Music Player");
-      } else if (diff > 50) {
-        // Swipe down - collapse player
-        musicPlayer.classList.add('collapsed');
-        togglePlayerBtn.textContent = "▲";
-        togglePlayerBtn.setAttribute("title", "Show Music Player");
-      }
-      musicPlayer.style.transform = '';
-      
-      // Provide haptic feedback if available
-      if (navigator.vibrate) {
-        navigator.vibrate(20);
-      }
-    }, { passive: true });
-  }
-
-  // Open file picker when "Load Music" is clicked
+  // COMPLETELY NEW APPROACH: Use a direct input replacement technique
+  // Remove old input and create a new one each time to avoid browser cache issues
   loadMusicBtn.addEventListener("click", () => {
-    musicFilesInput.click();
-  });
-
-  // Handle music file selection
-  musicFilesInput.addEventListener("change", (e) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
-
-    // Vibrate on file selection if supported (mobile feedback)
-    if (navigator.vibrate) {
-      navigator.vibrate(50);
-    }
-
-    handleNewTracks(files);
+    console.log("Load music button clicked");
     
-    // Show notification about how many songs were added
-    showNotification(`${files.length} ${files.length === 1 ? 'song' : 'songs'} added to playlist`);
+    // Create a new file input element
+    const newFileInput = document.createElement('input');
+    newFileInput.type = 'file';
+    newFileInput.accept = 'audio/*';
+    newFileInput.multiple = true;
+    newFileInput.style.display = 'none';
     
-    // Automatically expand player on mobile if it's the first time adding songs
-    if (window.innerWidth <= 768 && musicPlayer.classList.contains('collapsed') && 
-        playlistState.loadedTracks.length === files.length) {
-      togglePlayerBtn.click();
-    }
+    // Add it to the DOM
+    document.body.appendChild(newFileInput);
+    
+    // Add one-time event listener
+    newFileInput.addEventListener('change', (e) => {
+      console.log("File selection changed");
+      const files = Array.from(e.target.files);
+      
+      if (files.length > 0) {
+        console.log(`Selected ${files.length} files`);
+        
+        // Process the files
+        handleNewTracks(files);
+        
+        // Show notification
+        showNotification(`${files.length} ${files.length === 1 ? 'song' : 'songs'} added to playlist`);
+        
+        // Auto-expand player on mobile for first tracks
+        if (window.innerWidth <= 768 && musicPlayer.classList.contains('collapsed') && 
+            playlistState.loadedTracks.length === files.length) {
+          togglePlayerBtn.click();
+        }
+      }
+      
+      // Remove the input from DOM after processing
+      document.body.removeChild(newFileInput);
+    }, { once: true }); // This ensures the event only fires once
+    
+    // Trigger file selector
+    newFileInput.click();
   });
 
   // Play/Pause button
   playPauseBtn.addEventListener("click", () => {
+    // Guard against rapid clicking
+    const prevIsPlaying = playlistState.isPlaying;
+    
     if (audioPlayer.paused) {
-      audioPlayer.play().catch(err => {
-        console.warn("Audio playback failed:", err);
-      });
-      playPauseBtn.textContent = "⏸";
-      playlistState.isPlaying = true;
+      // Play the audio
+      audioPlayer.play()
+        .then(() => {
+          // Only update UI after successful play
+          playPauseBtn.textContent = "⏸";
+          playlistState.isPlaying = true;
+        })
+        .catch(err => {
+          console.warn("Audio playback failed:", err);
+          // Revert to accurate state based on player
+          playPauseBtn.textContent = "▶";
+          playlistState.isPlaying = false;
+        });
     } else {
+      // Pause the audio
       audioPlayer.pause();
       playPauseBtn.textContent = "▶";
       playlistState.isPlaying = false;
     }
+  });
+
+  // Also listen for play/pause events from the audio element
+  // to keep UI in sync with actual player state
+  audioPlayer.addEventListener("play", () => {
+    playPauseBtn.textContent = "⏸";
+    playlistState.isPlaying = true;
+  });
+
+  audioPlayer.addEventListener("pause", () => {
+    playPauseBtn.textContent = "▶";
+    playlistState.isPlaying = false;
   });
 
   // Next track button
@@ -269,6 +266,8 @@ function setupEventListeners() {
  * @param {File[]} files - Array of audio files to add
  */
 export function handleNewTracks(files) {
+  console.log(`Processing ${files.length} new tracks`);
+  
   // Add new tracks to existing playlist
   playlistState.loadedTracks = [...playlistState.loadedTracks, ...files];
   

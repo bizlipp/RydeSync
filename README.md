@@ -18,6 +18,7 @@ A stylish, lightweight, and secure P2P voice communication platform built for re
 - **Plugin Gallery**: Browse and preview available plugins
 - **Mobile-Ready UI**: Responsive design with touch support and gesture controls
 - **No Account Required**: Just enter a room name and start communicating
+- **Optimized Firestore Usage**: Smart debouncing and filtering for efficient data synchronization
 
 ## 📦 Tech Stack
 
@@ -43,8 +44,8 @@ A stylish, lightweight, and secure P2P voice communication platform built for re
 
 2. Create a `.env` file in the project root with your Firebase configuration:
 
-```
-# Firebase Configuration
+```javascript
+// Firebase Configuration
 VITE_FIREBASE_API_KEY=YOUR_API_KEY
 VITE_FIREBASE_AUTH_DOMAIN=YOUR_PROJECT.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=YOUR_PROJECT_ID
@@ -52,7 +53,7 @@ VITE_FIREBASE_STORAGE_BUCKET=YOUR_PROJECT.appspot.com
 VITE_FIREBASE_MESSAGING_SENDER_ID=YOUR_MESSAGING_SENDER_ID
 VITE_FIREBASE_APP_ID=YOUR_APP_ID
 
-# Environment
+// Environment
 NODE_ENV=development
 ```
 
@@ -172,6 +173,27 @@ const peer = new Peer(undefined, {
 });
 ```
 
+### Performance Optimizations
+
+RydeSync includes several optimizations to ensure smooth performance:
+
+#### WebRTC Optimization
+- Self-call prevention to avoid feedback loops
+- Efficient peer connection handling with reconnection strategies
+
+#### Firestore Optimization
+- Smart debouncing (1-second delay) for frequent updates
+- Update throttling: position (5s), playback state (1s), track changes (0.5s)
+- Metadata change filtering to avoid processing non-essential updates
+- Intelligent change detection to prevent processing null→null track changes
+- First-snapshot filtering to avoid unnecessary processing on initial loads
+
+These optimizations significantly reduce:
+- Network traffic and bandwidth usage
+- Browser console noise from frequent updates
+- CPU/memory overhead from unnecessary processing
+- Firestore read/write operations
+
 ### Room Capacity
 
 The peer-to-peer architecture works best with small to medium groups:
@@ -225,6 +247,30 @@ If you see `Uncaught SyntaxError: Cannot use import statement outside a module`,
 ### Firebase Configuration
 
 If Firebase fails to initialize, check your `.env` file and ensure all required environment variables are set correctly.
+
+### WebRTC and Firestore Issues
+
+#### Console Flooding with Messages
+
+If your browser console is flooded with messages, check:
+1. Firebase configuration is correct with real (not placeholder) values
+2. Your app is using Firestore only (not Realtime Database)
+3. You're accessing the app via `localhost` or a proper domain (not file:// protocol)
+
+#### Audio Sync Issues
+
+If audio sync isn't working properly:
+1. Check browser console for Firestore connection errors
+2. Ensure all users are on the same version of the app
+3. Try leaving and rejoining the room
+4. Check if your browser blocks autoplay (especially on mobile)
+
+#### Network Errors
+
+For connection issues:
+1. Ensure your firewall allows WebRTC connections
+2. Try using a different network if you're behind a restrictive NAT/firewall
+3. For production use, consider adding TURN server configuration
 
 ## License
 

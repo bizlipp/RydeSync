@@ -18,19 +18,20 @@
 
 // Import Firebase configuration at the top of the file
 import app from '../src/firebase.js';
-import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom, getConnectionHealth } from '../musicSync.js';
+import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom, getConnectionHealth, updateCurrentTrack } from '../musicSync.js';
 import * as MusicSync from '../musicSync.js';
-import { initPlaylistManager, handleNewTracks, playCurrentTrack, playNextTrack, updateTrackList } from './modules/playlistManager.js';
+import { initPlaylistManager } from './modules/playlistManager.js';
 import { initVolumeControl, toggleMute, setVolume } from './modules/volumeControl.js';
+import { adjustPlaybackPosition } from '../src/utils/musicSyncUtils.js';
 
 // Export needed functions
 export { 
   initializePeer, 
   joinRoom, 
   leaveRoom, 
-  updatePeersActivity,
   handleCall, 
-  updateConnectionStatus
+  updateConnectionStatus,
+  updatePeersActivity
 };
 
 // DEBUG FLAG - Enable verbose logging
@@ -47,38 +48,6 @@ let maxReconnectAttempts = 10;
 let reconnectTimer = null;
 let connectionStatus = 'disconnected';
 let firebaseConnected = true;
-
-// Initialize application components
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('Initializing RydeSync application components from app.js');
-  
-  // Initialize core media controls
-  initMediaControls();
-  
-  // Initialize Firebase services
-  initializeFirebase();
-  
-  // Initialize PeerJS connection
-  initializePeer();
-});
-
-/**
- * Initialize all media control components
- */
-function initMediaControls() {
-  // Initialize playlist manager for music player
-  const playlistInitialized = initPlaylistManager();
-  
-  // Initialize volume control for audio
-  const volumeInitialized = initVolumeControl();
-  
-  if (DEBUG_MODE) {
-    console.log(`🎵 Playlist manager initialization: ${playlistInitialized ? '✅ Success' : '❌ Failed'}`);
-    console.log(`🔊 Volume control initialization: ${volumeInitialized ? '✅ Success' : '❌ Failed'}`);
-  }
-  
-  return playlistInitialized && volumeInitialized;
-}
 
 // Create connection status UI
 const createConnectionStatusUI = () => {
@@ -311,7 +280,7 @@ function joinRoom(isReconnect = false) {
   
   // If we already have a peer ID, complete the room join
   if (window.peer.id) {
-    completeRoomJoin(window.peer.id);
+  completeRoomJoin(window.peer.id);
   } else {
     // Mark as joined so we'll join when we get a peer ID
     joined = true;
@@ -344,15 +313,15 @@ function completeRoomJoin(peerId) {
         
         // Show controls once we have media access
         document.getElementById("controls").style.display = "flex";
-        
+    
         // Complete the join process
         performRoomJoin(room, peerId, stream);
-      })
+  })
       .catch(err => {
         console.error("Error accessing microphone:", err);
         document.getElementById("status").innerText = `⚠️ Microphone access error: ${err.message}`;
-        document.getElementById("joinBtn").disabled = false;
-        
+    document.getElementById("joinBtn").disabled = false;
+    
         // Join anyway, but without audio
         if (confirm("Could not access microphone. Join room without voice capability?")) {
           performRoomJoin(room, peerId, null);
@@ -393,14 +362,15 @@ function performRoomJoin(room, peerId, stream) {
         if (joinBtn) joinBtn.style.display = "none";
         if (leaveBtn) leaveBtn.style.display = "inline-block";
         
-        // Update peer count display
-        updatePeerCount(peers.length);
+        // Connect to each peer
+        const filteredPeers = peers.filter(p => p !== null && p !== undefined);
+        console.log(`Found ${filteredPeers.length} valid peers in room:`, filteredPeers);
         
-        // Log peers found
-        console.log(`Found ${peers.length} peers in room:`, peers);
+        // Update peer count display
+        updatePeerCount(filteredPeers.length);
         
         // Connect to each peer
-        peers.forEach(peerId => {
+        filteredPeers.forEach(peerId => {
           if (peerId !== window.peer.id) {
             connectToPeer(peerId, stream);
           }
@@ -417,7 +387,51 @@ function performRoomJoin(room, peerId, stream) {
             // Set up listener for music sync updates
             listenToMusicSync(room, (data) => {
               console.log('Music sync update:', data);
-              // Handle music sync updates
+              
+              const audioPlayer = document.getElementById('audioPlayer');
+              if (!audioPlayer || !data) return;
+              
+              // Handle the track update
+              if (data.currentTrack && data.currentTrack.url) {
+                if (audioPlayer.src !== data.currentTrack.url) {
+                  console.log(`Playing synced track: ${data.currentTrack.url}`);
+                  audioPlayer.src = data.currentTrack.url;
+                  audioPlayer.load();
+                  
+                  audioPlayer.addEventListener('canplaythrough', () => {
+                    console.log('Audio can play through, attempting playback.');
+                    audioPlayer.play().catch(err => {
+                      console.warn('Autoplay blocked, waiting for user gesture.', err);
+                    });
+                  }, { once: true });
+                }
+              }
+              
+              // Handle playback state (play/pause)
+              if (typeof data.isPlaying !== 'undefined') {
+                if (data.isPlaying && audioPlayer.paused) {
+                  audioPlayer.play().catch(err => {
+                    console.warn('Could not autoplay synced track:', err);
+                  });
+                } else if (!data.isPlaying && !audioPlayer.paused) {
+                  audioPlayer.pause();
+                }
+              }
+              
+              // Handle playback position with drift correction
+              if (typeof data.currentPosition !== 'undefined') {
+                const correctedPosition = adjustPlaybackPosition(
+                  data.currentPosition,
+                  data.isPlaying,
+                  data.serverTimestamp || Date.now(), 
+                  audioPlayer.currentTime
+                );
+
+                if (Math.abs(correctedPosition - audioPlayer.currentTime) > 1) {
+                  console.log(`Adjusting playback position from ${audioPlayer.currentTime} → ${correctedPosition}`);
+                  audioPlayer.currentTime = correctedPosition;
+                }
+              }
             });
           })
           .catch(err => {
@@ -470,13 +484,13 @@ function connectToPeer(peerId, stream) {
           conn.send({
             type: 'ping',
             timestamp: Date.now()
-          });
-          
+      });
+      
           // Update last active time
           conn.metadata.lastActive = Date.now();
         } else {
           clearInterval(pingInterval);
-        }
+    }
       }, 30000); // Every 30 seconds
     });
     
@@ -542,12 +556,12 @@ function leaveRoom() {
     
     // Close all peer connections
     if (window.connections && window.connections.length > 0) {
-      window.connections.forEach(conn => {
+    window.connections.forEach(conn => {
         if (conn && conn.open) {
-          conn.close();
-        }
-      });
-      window.connections = [];
+        conn.close();
+      }
+    });
+    window.connections = [];
     }
     
     // Stop media stream tracks
@@ -677,8 +691,8 @@ function updateDebugStatusBar() {
     debugBar.appendChild(peerStatus);
     debugBar.appendChild(firebaseStatus);
     debugBar.appendChild(roomStatus);
-  }
-  
+}
+
   // Update status texts
   const peerStatusEl = document.getElementById('peerStatus');
   const firebaseStatusEl = document.getElementById('firebaseStatus');
@@ -699,49 +713,37 @@ function updateDebugStatusBar() {
     const room = document.getElementById('room').value.trim();
     roomStatusEl.textContent = `🚪 Room: ${joined ? room : 'not joined'}`;
     roomStatusEl.style.color = joined ? '#0f0' : '#f33';
-  }
-}
-
+        }
+      }
+      
 /**
  * Sync to a track URL in a music room
  * @param {Object} trackData - Track data object
  * @param {string} trackData.url - Track URL
  * @param {string} trackData.room - Room name
  */
-function syncToTrack(trackData) {
-  const { url, room } = trackData;
-  
+export async function syncToTrack({ url, room }) {
   if (!url || !room) {
-    console.error('Missing URL or room for track sync');
+    console.error('Missing URL or Room');
     return;
   }
   
-  console.log(`Syncing to track: ${url} in room: ${room}`);
-  
-  // Join the music room if not already joined
-  joinMusicRoom(room)
-    .then(() => {
-      // Set the track in the music sync system
-      MusicSync.updateCurrentTrack(room, { url })
-        .then(() => {
-          console.log('Track set successfully');
-          
-          // Display track URL in the player as an indication it's playing remotely
-          const musicTitle = document.getElementById('musicTitle');
-          if (musicTitle) {
-            const displayName = url.length > 30 
-              ? url.substring(0, 27) + '...' 
-              : url;
-            musicTitle.textContent = `🎵 ${displayName}`;
-          }
-        })
-        .catch(err => {
-          console.error('Error setting track:', err);
-        });
-    })
-    .catch(err => {
-      console.error('Error joining music room:', err);
-    });
+  console.log(`Syncing track to room: ${room}`);
+
+  // Use the global peer variable instead of importing it
+  const userId = peer?.id || null;
+  if (!userId) {
+    console.error('No Peer ID found, cannot sync track.');
+    return;
+  }
+
+  try {
+    await joinMusicRoom(room, userId);
+    await updateCurrentTrack(room, { url });
+    console.log('Track synced successfully.');
+  } catch (err) {
+    console.error('Error syncing track:', err);
+  }
 }
 
 /**
@@ -758,19 +760,19 @@ function handleCall(call) {
     if (!audio) {
       audio = document.createElement("audio");
       audio.id = `audio-${call.peer}`;
-      audio.autoplay = true;
+    audio.autoplay = true;
       audio.controls = false;
       
       // Add to document but keep it hidden
       audio.style.display = "none";
-      document.body.appendChild(audio);
+    document.body.appendChild(audio);
     }
     
     // Handle incoming stream
     call.on("stream", stream => {
       console.log(`Received stream from: ${call.peer}`);
       audio.srcObject = stream;
-      
+
       // Set volume to current value on volume slider
       const volumeSlider = document.getElementById("volume");
       if (volumeSlider) {
@@ -792,8 +794,8 @@ function handleCall(call) {
       
       // Update debug status
       updateDebugStatusBar();
-    });
-    
+  });
+
     // Handle call errors
     call.on("error", err => {
       console.error(`Call error with ${call.peer}:`, err);
@@ -813,17 +815,18 @@ function handleCall(call) {
 
 /**
  * Update the peer count display
- * @param {number} count - Number of peers
+ * @param {number} count - Number of peers (excluding self)
  */
 function updatePeerCount(count) {
   const peerCountEl = document.getElementById('peerCount');
   if (!peerCountEl) return;
   
-  // Add 1 to include ourselves
+  // Add 1 to include ourselves in the total count
+  // The 'count' parameter is the number of other peers (excluding self)
   const totalCount = count + 1;
   
   peerCountEl.textContent = `🟢 ${totalCount} ${totalCount === 1 ? 'rider' : 'riders'} online`;
-  
+    
   // Change color based on count
   if (totalCount > 5) {
     // Many peers - could have bandwidth issues
@@ -863,15 +866,15 @@ function setupPeerVisualization() {
   // Setup periodic updates
   setInterval(() => {
     if (joined) {
-      updatePeersActivity();
-    }
+    updatePeersActivity();
+  }
   }, 30000); // Update every 30 seconds
 }
 
 /**
  * Update peers activity visualization
  */
-export function updatePeersActivity() {
+function updatePeersActivity() {
   const peersContainer = document.getElementById('peersContainer');
   const peersList = document.getElementById('peersList');
   
@@ -888,17 +891,17 @@ export function updatePeersActivity() {
   // Make sure we have a connection and are joined to a room
   if (!window.peer || !currentRoom) {
     peersContainer.style.display = 'none';
-    return;
-  }
-  
+        return;
+      }
+      
   peersContainer.style.display = 'block';
-  
+      
   // Get a list of all peer connections
   const connections = window.connections || [];
   
   // Clear the list first
-  peersList.innerHTML = '';
-  
+      peersList.innerHTML = '';
+      
   // Add entry for ourselves
   const selfItem = createPeerItem({
     id: window.peer.id,
@@ -937,23 +940,23 @@ function createPeerItem(peer) {
   
   // Determine activity level
   let activityClass = 'activity-inactive';
-  let fadeClass = '';
-  
+        let fadeClass = '';
+        
   const timeDiff = Date.now() - peer.lastActive;
   if (timeDiff < 10000) {
     // Active in the last 10 seconds
-    activityClass = 'activity-active';
+          activityClass = 'activity-active';
   } else if (timeDiff < 60000) {
     // Active in the last minute
-    activityClass = 'activity-recent'; 
+          activityClass = 'activity-recent';
   } else if (timeDiff < 300000) {
     // Active in the last 5 minutes
-    activityClass = 'activity-idle';
-    fadeClass = 'peer-fade-25';
+          activityClass = 'activity-idle';
+          fadeClass = 'peer-fade-25';
   } else if (timeDiff < 900000) {
     // Active in the last 15 minutes
-    activityClass = 'activity-inactive';
-    fadeClass = 'peer-fade-50';
+          activityClass = 'activity-inactive';
+          fadeClass = 'peer-fade-50';
   } else {
     // Inactive for more than 15 minutes
     activityClass = 'activity-inactive';
@@ -1021,3 +1024,58 @@ function stringToColor(str) {
   const h = hash % 360;
   return `hsl(${h}, 70%, 40%)`;
 }
+
+// Initialize the application when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('🚀 Initializing application...');
+
+  // Initialize Firebase
+initializeFirebase();
+  
+  // Initialize Peer connection
+  initializePeer();
+  
+  // Initialize the playlist manager
+  if (initPlaylistManager()) {
+    console.log('✅ Playlist manager initialized');
+  } else {
+    console.error('❌ Failed to initialize playlist manager');
+  }
+  
+  // Initialize volume controls
+  if (initVolumeControl()) {
+    console.log('✅ Volume controls initialized');
+  } else {
+    console.warn('⚠️ Volume controls not available');
+  }
+  
+  // Initialize peer visualization
+  setupPeerVisualization();
+  
+  // Set up the playTrackBtn click event
+  const playTrackBtn = document.getElementById('playTrackBtn');
+  if (playTrackBtn) {
+    playTrackBtn.addEventListener('click', () => {
+      const roomInput = document.getElementById('room');
+      const trackUrlInput = document.getElementById('trackURL');
+      
+      if (!roomInput || !roomInput.value.trim()) {
+        alert('Please enter a room name first');
+        return;
+      }
+      
+      if (!trackUrlInput || !trackUrlInput.value.trim()) {
+        alert('Please enter a track URL');
+        return;
+      }
+      
+      const roomName = roomInput.value.trim();
+      const trackUrl = trackUrlInput.value.trim();
+      
+      console.log(`Play track button clicked: ${trackUrl} in room ${roomName}`);
+      
+      // Call the syncToTrack function
+      syncToTrack({ url: trackUrl, room: roomName });
+    });
+  }
+});

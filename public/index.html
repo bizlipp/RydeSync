@@ -7,9 +7,51 @@
   <link rel="icon" href="https://aerovistaassets.s3.amazonaws.com/favicon.png" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="RydeSync - Secure P2P Voice Communication by AeroVista LLC">
+  <meta name="description" content="RydeSync - Secure peer-to-peer voice communication for teams, riders, and groups.">
   <meta name="theme-color" content="#00AEEF">
   <style>
+    /* Core status styles - essential UI components */
+    #status {
+      margin: 20px auto;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+      font-weight: bold;
+    }
+    
+    .status-connecting {
+      background-color: #ffecb3;
+      color: #ff6f00;
+    }
+    
+    .status-connected {
+      background-color: #c8e6c9;
+      color: #2e7d32;
+    }
+    
+    .status-disconnected {
+      background-color: #ffcdd2;
+      color: #c62828;
+    }
+    
+    .status-error {
+      background-color: #ef9a9a;
+      color: #b71c1c;
+    }
+    
+    /* Peer count indicator */
+    #peerCount {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      z-index: 10;
+    }
+    
     /* Connection status styles */
     .connection-status {
       position: fixed;
@@ -184,13 +226,12 @@
     </svg>
     Join Room
   </button>
-
-  <div id="musicSyncUI" style="text-align:center; margin-top:2rem;">
-    <h3>🎵 Music Sync</h3>
-    <input id="trackURL" placeholder="Paste track URL" style="width:60%" />
-    <button id="playTrackBtn">Play in Room</button>
-    <p style="font-size:0.8rem; margin-top:0.5rem; color:#666;">Uses the music player below for playback control</p>
-  </div>
+  <button id="leaveBtn" style="display:none;">
+    <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+    </svg>
+    Leave Room
+  </button>
 
   <div id="status">🔧 Waiting for input...</div>
   
@@ -224,8 +265,9 @@
   </footer>
 
   <!-- Music Player toggle button (outside of the music player div) -->
-  <button id="togglePlayer" title="Toggle Music Player">▲</button>
+  <button id="togglePlayer" title="Toggle Music Player" style="z-index: 9999;">▲</button>
 
+  <!-- Hidden music player container - minimal structure -->
   <div id="musicPlayer" class="collapsed">
     <div id="musicHeader">
       <span id="musicTitle">MUSIC PLAYER</span>
@@ -239,6 +281,13 @@
         <button id="playPause" title="Play/Pause">▶</button>
         <button id="nextTrack" title="Next Track">⏭</button>
         <button id="shuffleBtn" title="Shuffle">🔀</button>
+        <button id="shareTrackBtn" title="Share Track">+</button>
+      </div>
+      
+      <!-- Track Share Panel (hidden by default) -->
+      <div id="shareTrackPanel" class="share-track-panel" style="display:none;">
+        <input id="trackUrlInput" type="text" placeholder="Enter Track URL" />
+        <button id="submitTrackBtn">Share</button>
       </div>
       
       <div id="filePickerArea">
@@ -251,27 +300,11 @@
           SELECT SONGS
           <span class="mobile-text">FROM YOUR DEVICE</span>
         </button>
-        <input
-          type="file"
-          id="musicFiles"
-          accept="audio/*"
-          multiple
-          style="display:none;"
-        />
       </div>
       
-      <div class="player-tip">
-        <span class="tip-icon">💡</span>
-        <span>You can also drag &amp; drop multiple audio files here</span>
-      </div>
-
       <div class="playlist-header">
         <h3>YOUR PLAYLIST</h3>
         <button id="clearPlaylist" title="Clear Playlist">CLEAR ALL</button>
-      </div>
-
-      <div class="mobile-helper">
-        <p>Tap a song to play it. Use the buttons above to control playback.</p>
       </div>
 
       <ul id="trackList"></ul>
@@ -364,8 +397,7 @@
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   
   <!-- Load app JS as modules -->
-  <script type="module" src="app/app.js"></script>
-  <script type="module" src="app/musicPlayer.js"></script>
+  <script type="module" src="main.js"></script>
   
   <!-- Fallback message for browsers that don't support ES modules -->
   <noscript>Your browser does not support JavaScript or ES Modules. Please use a modern browser.</noscript>
