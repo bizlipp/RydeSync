@@ -707,3 +707,29 @@ export default {
   getConnectionHealth,
   resetMusicSync
 }; 
+
+/**
+ * Safe track loading with canplaythrough event
+ * @param {HTMLAudioElement} audioPlayer - The audio player element
+ * @param {string} url - URL of the track to play
+ * @param {number} syncedPosition - Position in seconds to sync to
+ */
+export function safePlayTrack(audioPlayer, url, syncedPosition = 0) {
+  audioPlayer.pause(); // Reset player
+  audioPlayer.src = url;
+  audioPlayer.load(); // Force reload buffer
+
+  audioPlayer.addEventListener('canplaythrough', () => {
+    console.log('✅ Track ready to play, syncing position...');
+    if (Math.abs(audioPlayer.currentTime - syncedPosition) > 0.5) {
+      console.log(`🔄 Adjusting position to synced point: ${syncedPosition}s`);
+      audioPlayer.currentTime = syncedPosition;
+    }
+    audioPlayer.play().then(() => {
+      console.log('🎶 Playback started.');
+    }).catch((err) => {
+      console.warn('⚠️ Autoplay failed, might need user interaction.', err);
+      // TODO: Optional: show a "Click to Resume" overlay
+    });
+  }, { once: true });
+} 

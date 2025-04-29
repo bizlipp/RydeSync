@@ -18,7 +18,7 @@
 
 // Import Firebase configuration at the top of the file
 import app from '../src/firebase.js';
-import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom, getConnectionHealth, updateCurrentTrack } from '../musicSync.js';
+import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom, getConnectionHealth, updateCurrentTrack, safePlayTrack } from '../musicSync.js';
 import * as MusicSync from '../musicSync.js';
 import { initPlaylistManager } from './modules/playlistManager.js';
 import { initVolumeControl, toggleMute, setVolume } from './modules/volumeControl.js';
@@ -393,33 +393,16 @@ function performRoomJoin(room, peerId, stream) {
               
               // Handle the track update
               if (data.currentTrack && data.currentTrack.url) {
-                if (audioPlayer.src !== data.currentTrack.url) {
-                  console.log(`Playing synced track: ${data.currentTrack.url}`);
-                  audioPlayer.src = data.currentTrack.url;
-                  audioPlayer.load();
-                  
-                  audioPlayer.addEventListener('canplaythrough', () => {
-                    console.log('Audio can play through, attempting playback.');
-                    audioPlayer.play().catch(err => {
-                      console.warn('Autoplay blocked, waiting for user gesture.', err);
-                    });
-                  }, { once: true });
-                }
-              }
-              
-              // Handle playback state (play/pause)
-              if (typeof data.isPlaying !== 'undefined') {
-                if (data.isPlaying && audioPlayer.paused) {
-                  audioPlayer.play().catch(err => {
-                    console.warn('Could not autoplay synced track:', err);
-                  });
-                } else if (!data.isPlaying && !audioPlayer.paused) {
+                if (audioPlayer.src !== data.currentTrack.url && data.isPlaying) {
+                  console.log('🎯 Attempting to play synced track:', data.currentTrack.url);
+                  safePlayTrack(audioPlayer, data.currentTrack.url, data.currentPosition || 0);
+                } else if (!data.isPlaying) {
                   audioPlayer.pause();
                 }
               }
               
-              // Handle playback position with drift correction
-              if (typeof data.currentPosition !== 'undefined') {
+              // Handle playback position with drift correction when we already have the track loaded
+              else if (typeof data.currentPosition !== 'undefined' && audioPlayer.src && data.isPlaying) {
                 const correctedPosition = adjustPlaybackPosition(
                   data.currentPosition,
                   data.isPlaying,

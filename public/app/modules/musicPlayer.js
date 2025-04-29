@@ -180,26 +180,44 @@ function setupPlayerControls() {
   // Play/Pause button
   if (playPauseBtn) {
     playPauseBtn.addEventListener("click", () => {
+      const room = document.getElementById("room")?.value.trim();
+      if (!room) {
+        console.warn('No room selected, cannot sync playback state');
+        return;
+      }
+
       if (audioPlayer.paused) {
-        audioPlayer.play().catch(err => {
-          console.warn("Audio playback failed:", err);
-        });
-        playPauseBtn.textContent = "⏸";
+        console.log('▶️ Play button clicked, syncing...');
         
-        // Sync playback state
-        const room = document.getElementById("room")?.value.trim();
-        if (room) {
-          updatePlaybackState(room, true, audioPlayer.currentTime);
-        }
+        // Update playback state in Firebase
+        updatePlaybackState(room, true, audioPlayer.currentTime)
+          .then(() => {
+            console.log('Play state synced to room successfully');
+            
+            // Local playback
+            audioPlayer.play().catch(err => {
+              console.warn("⚠️ Audio playback failed:", err);
+            });
+            playPauseBtn.textContent = "⏸";
+          })
+          .catch(err => {
+            console.error('Failed to sync play state:', err);
+          });
       } else {
-        audioPlayer.pause();
-        playPauseBtn.textContent = "▶";
+        console.log('⏸️ Pause button clicked, syncing...');
         
-        // Sync playback state
-        const room = document.getElementById("room")?.value.trim();
-        if (room) {
-          updatePlaybackState(room, false, audioPlayer.currentTime);
-        }
+        // Update playback state in Firebase
+        updatePlaybackState(room, false, audioPlayer.currentTime)
+          .then(() => {
+            console.log('Pause state synced to room successfully');
+            
+            // Local playback
+            audioPlayer.pause();
+            playPauseBtn.textContent = "▶";
+          })
+          .catch(err => {
+            console.error('Failed to sync pause state:', err);
+          });
       }
     });
   }
