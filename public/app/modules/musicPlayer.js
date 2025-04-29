@@ -7,7 +7,9 @@ export {
   setupPlayerControls,
   toggleSync,
   updatePlaybackPosition,
-  playTrack
+  playTrack,
+  pauseTrack,
+  safePlayTrack
 };
 
 // Module state 
@@ -16,6 +18,62 @@ let loadedTracks = [];
 let shuffleMode = false;
 let playOrder = [];
 let isInitialized = false;
+
+/**
+ * Fade out audio volume smoothly
+ * @param {HTMLAudioElement} audio - The audio element to fade out
+ */
+async function fadeOut(audio) {
+  if (!audio) return;
+  for (let v = audio.volume; v >= 0.05; v -= 0.05) {
+    audio.volume = Math.max(0, v);
+    await new Promise(r => setTimeout(r, 50));
+  }
+  audio.volume = 0;
+}
+
+/**
+ * Fade in audio volume smoothly
+ * @param {HTMLAudioElement} audio - The audio element to fade in
+ */
+async function fadeIn(audio) {
+  if (!audio) return;
+  for (let v = 0; v <= 1; v += 0.05) {
+    audio.volume = Math.min(1, v);
+    await new Promise(r => setTimeout(r, 50));
+  }
+  audio.volume = 1;
+}
+
+/**
+ * Update the now playing title with scrolling effect if needed
+ * @param {string} trackName - The name of the track to display
+ */
+function updateNowPlayingTitle(trackName) {
+  const musicTitle = document.getElementById('musicTitle');
+  
+  if (!musicTitle) return;
+  
+  musicTitle.innerHTML = ''; // Clear
+  const textSpan = document.createElement('span');
+  textSpan.id = 'musicTitleText';
+  textSpan.textContent = trackName;
+
+  // Check if too long
+  musicTitle.appendChild(textSpan);
+  
+  setTimeout(() => {
+    const parentWidth = musicTitle.offsetWidth;
+    const textWidth = textSpan.scrollWidth;
+    
+    if (textWidth > parentWidth) {
+      musicTitle.classList.add('scrolling');
+    } else {
+      musicTitle.classList.remove('scrolling');
+      textSpan.style.animation = 'none'; // Stop animation if not needed
+    }
+  }, 100);
+}
 
 // Initialize music player elements and set initial state
 function initializePlayer() {
@@ -40,11 +98,10 @@ async function playTrack(roomName, trackUrl) {
     console.error('Room name and track URL are required');
     return;
   }
-  
+
   try {
     console.log(`Playing track in room ${roomName}: ${trackUrl}`);
     
-    // Create track object
     const trackInfo = {
       id: `track-${Date.now()}`,
       title: 'Shared Track',
@@ -52,39 +109,37 @@ async function playTrack(roomName, trackUrl) {
       url: trackUrl,
       duration: 0
     };
-    
-    // Get track info from input field if available
-    const trackUrlInput = document.getElementById('trackURL');
-    if (trackUrlInput && trackUrlInput.value) {
-      trackInfo.url = trackUrlInput.value.trim();
-    }
-    
-    // Update current track in Firebase
-    await updateCurrentTrack(roomName, trackInfo);
-    
-    // Also try to play it locally
+
     const audioPlayer = document.getElementById('audioPlayer');
     if (audioPlayer) {
+      await fadeOut(audioPlayer);
       audioPlayer.src = trackInfo.url;
-      audioPlayer.load();
-      
-      // Remove any previous canplaythrough listener if needed
-      audioPlayer.addEventListener('canplaythrough', () => {
-        console.log('✅ Audio ready, attempting to play.');
-        audioPlayer.play().catch(err => {
-          console.warn('⚠️ Autoplay failed. Waiting for user interaction.', err);
-          // Optional: Show a manual "Click to Play" button if you want
-        });
-      }, { once: true });
+      await audioPlayer.load();
+      await audioPlayer.play();
+      await fadeIn(audioPlayer);
     }
-    
-    // Show notification
-    showNotification('Track shared with room');
-    
+
+    await updateCurrentTrack(roomName, trackInfo);
+    await updatePlaybackState(roomName, true, 0);
+
+    updateNowPlayingTitle(trackInfo.title);
+
+    showNotification('Track shared and playing');
     return true;
   } catch (error) {
     console.error('Error playing track:', error);
     return false;
+  }
+}
+
+/**
+ * Pause the current track
+ */
+function pauseTrack() {
+  console.log('⏸️ Pausing audio player');
+  const audioPlayer = document.getElementById("audioPlayer");
+  if (audioPlayer) {
+    audioPlayer.pause();
   }
 }
 
@@ -103,6 +158,12 @@ function setupPlayerControls() {
   const shuffleBtn = document.getElementById("shuffleBtn");
   const clearPlaylistBtn = document.getElementById("clearPlaylist");
   const playerBody = document.getElementById("playerBody");
+  
+  // Sync timing variables
+  let lastSyncTime = 0;
+  const MIN_SYNC_INTERVAL = 5000; // 5 seconds
+  let seekTimeout = null;
+  const SEEK_SYNC_DELAY = 1000; // 1s after seek
   
   if (!musicPlayer || !togglePlayerBtn || !audioPlayer) {
     console.warn('Music player elements not found');
@@ -179,7 +240,7 @@ function setupPlayerControls() {
   
   // Play/Pause button
   if (playPauseBtn) {
-    playPauseBtn.addEventListener("click", () => {
+    playPauseBtn.addEventListener("click", async () => {
       const room = document.getElementById("room")?.value.trim();
       if (!room) {
         console.warn('No room selected, cannot sync playback state');
@@ -187,37 +248,28 @@ function setupPlayerControls() {
       }
 
       if (audioPlayer.paused) {
-        console.log('▶️ Play button clicked, syncing...');
+        console.log('▶️ Play button clicked, attempting playback...');
         
-        // Update playback state in Firebase
-        updatePlaybackState(room, true, audioPlayer.currentTime)
-          .then(() => {
-            console.log('Play state synced to room successfully');
-            
-            // Local playback
-            audioPlayer.play().catch(err => {
-              console.warn("⚠️ Audio playback failed:", err);
-            });
-            playPauseBtn.textContent = "⏸";
-          })
-          .catch(err => {
-            console.error('Failed to sync play state:', err);
-          });
+        try {
+          // Try to play
+          await audioPlayer.play();
+          
+          // If successful, update UI and sync
+          console.log('✅ Play command successful');
+          togglePlayPauseButton(true);
+          updatePlaybackState(room, true, audioPlayer.currentTime);
+        } catch (err) {
+          console.warn("⚠️ Play command failed:", err);
+          togglePlayPauseButton(false);
+          showManualPlayPrompt();
+        }
       } else {
-        console.log('⏸️ Pause button clicked, syncing...');
+        console.log('⏸️ Pause button clicked');
         
-        // Update playback state in Firebase
-        updatePlaybackState(room, false, audioPlayer.currentTime)
-          .then(() => {
-            console.log('Pause state synced to room successfully');
-            
-            // Local playback
-            audioPlayer.pause();
-            playPauseBtn.textContent = "▶";
-          })
-          .catch(err => {
-            console.error('Failed to sync pause state:', err);
-          });
+        // Pause is always allowed
+        audioPlayer.pause();
+        togglePlayPauseButton(false);
+        updatePlaybackState(room, false, audioPlayer.currentTime);
       }
     });
   }
@@ -338,22 +390,66 @@ function setupPlayerControls() {
     
     // Update play/pause button state
     audioPlayer.addEventListener("play", () => {
-      if (playPauseBtn) playPauseBtn.textContent = "⏸";
+      togglePlayPauseButton(true);
     });
     
     audioPlayer.addEventListener("pause", () => {
-      if (playPauseBtn) playPauseBtn.textContent = "▶";
+      togglePlayPauseButton(false);
+      
+      // Sync immediately when paused
+      const room = document.getElementById("room")?.value.trim();
+      if (!room) return;
+
+      const position = audioPlayer.currentTime;
+      if (!isNaN(position) && position > 0) {
+        updatePlaybackState(room, false, position)
+          .then(() => {
+            console.log(`Paused and synced position: ${position.toFixed(2)}s`);
+          })
+          .catch(err => {
+            console.error('Error syncing paused position:', err);
+          });
+      }
     });
     
     // Update position while playing
     audioPlayer.addEventListener("timeupdate", () => {
       const room = document.getElementById("room")?.value.trim();
-      if (room && !audioPlayer.paused && audioPlayer.currentTime > 0) {
-        // Only update position every 5 seconds to reduce Firebase writes
-        if (Math.floor(audioPlayer.currentTime) % 5 === 0) {
-          updatePlaybackPosition(room, audioPlayer.currentTime);
+      if (!room || audioPlayer.paused) return;
+
+      const now = Date.now();
+      if (now - lastSyncTime > MIN_SYNC_INTERVAL) {
+        const position = audioPlayer.currentTime;
+        if (!isNaN(position) && position > 0) {
+          updatePlaybackPosition(room, position)
+            .then(() => {
+              lastSyncTime = Date.now();
+            })
+            .catch(err => {
+              console.error('Error updating playback position:', err);
+            });
         }
       }
+    });
+
+    // Sync after seek
+    audioPlayer.addEventListener("seeked", () => {
+      const room = document.getElementById("room")?.value.trim();
+      if (!room) return;
+
+      clearTimeout(seekTimeout);
+      seekTimeout = setTimeout(() => {
+        const position = audioPlayer.currentTime;
+        if (!isNaN(position) && position > 0) {
+          updatePlaybackPosition(room, position)
+            .then(() => {
+              console.log(`Seeked and synced position: ${position.toFixed(2)}s`);
+            })
+            .catch(err => {
+              console.error('Error syncing seeked position:', err);
+            });
+        }
+      }, SEEK_SYNC_DELAY);
     });
   }
 }
@@ -508,7 +604,7 @@ function updateTrackList() {
 }
 
 // Play the current track
-function playCurrentTrack() {
+async function playCurrentTrack() {
   if (loadedTracks.length === 0) return;
   
   const currentTrack = loadedTracks[currentTrackIndex];
@@ -526,44 +622,133 @@ function playCurrentTrack() {
   // Hide player until loaded
   audioPlayer.style.visibility = 'hidden';
   
-  // Set audio source and play
-  audioPlayer.src = currentTrack._objectUrl;
-  audioPlayer.load();
+  try {
+    console.log("🎶 Attempting to play track...");
+    
+    // Fade out current audio if playing
+    if (!audioPlayer.paused) {
+      await fadeOut(audioPlayer);
+    }
+    
+    // Set audio source and play
+    audioPlayer.src = currentTrack._objectUrl;
+    await audioPlayer.load();
 
-  // Remove any previous canplaythrough listener if needed
-  audioPlayer.addEventListener('canplaythrough', () => {
-    console.log('✅ Audio ready, attempting to play.');
+    // Update now playing title with track name
+    const trackName = currentTrack.name.replace(/\.[^/.]+$/, "");
+    updateNowPlayingTitle(trackName || "Unknown Track");
+    
+    // Start playback
+    await audioPlayer.play();
+    
     // Show player now that it's ready
     audioPlayer.style.visibility = 'visible';
-    audioPlayer.play().catch(err => {
-      console.warn('⚠️ Autoplay failed. Waiting for user interaction.', err);
-      // Optional: Show a manual "Click to Play" button if you want
-    });
-  }, { once: true });
-  
-  // Update play/pause button
-  if (playPauseBtn) playPauseBtn.textContent = "⏸";
+    
+    // Fade in the new track
+    await fadeIn(audioPlayer);
+    
+    // Update UI
+    console.log("✅ Audio playback started successfully.");
+    togglePlayPauseButton(true); // Update UI button to Pause
+
+    // Now safely sync both track and playback state together
+    const room = document.getElementById("room")?.value.trim();
+    if (room) {
+      const track = {
+        url: currentTrack._objectUrl,
+        title: trackName,
+        duration: audioPlayer.duration || 0
+      };
+      
+      // Update both track and playback state together
+      await Promise.all([
+        updateCurrentTrack(room, track),
+        updatePlaybackState(room, true, 0) // Start from beginning
+      ]);
+      
+      console.log('✅ Local track and playback state synced to room');
+    }
+
+  } catch (error) {
+    console.error("❌ Audio playback failed:", error);
+    
+    // Show player now that it's loaded
+    audioPlayer.style.visibility = 'visible';
+    
+    togglePlayPauseButton(false); // Make sure UI stays on Play
+    showManualPlayPrompt(); // Tell user to click to unlock audio
+    
+    // Sync the paused state if in a room
+    const room = document.getElementById("room")?.value.trim();
+    if (room) {
+      updatePlaybackState(room, false, 0).catch(err => {
+        console.error('Failed to sync paused state:', err);
+      });
+    }
+  }
   
   // Update track list to highlight current track
   updateTrackList();
+}
+
+/**
+ * Toggle the play/pause button state
+ * @param {boolean} isPlaying - Whether audio is playing
+ */
+function togglePlayPauseButton(isPlaying) {
+  const playPauseBtn = document.getElementById("playPause");
+  if (!playPauseBtn) return;
   
-  // Sync track data to room
-  const room = document.getElementById("room")?.value.trim();
-  if (room) {
-    const track = {
-      url: currentTrack._objectUrl,
-      title: currentTrack.name.replace(/\.[^/.]+$/, ""),
-      duration: audioPlayer.duration || 0
-    };
-    
-    // Update track in Firebase
-    updateCurrentTrack(room, track);
-    updatePlaybackState(room, true, 0);
+  if (isPlaying) {
+    playPauseBtn.textContent = "⏸";
+  } else {
+    playPauseBtn.textContent = "▶";
   }
 }
 
+/**
+ * Show a manual play prompt when autoplay is blocked
+ */
+function showManualPlayPrompt() {
+  console.warn("🔔 Browser prevented autoplay. User must click to start playback.");
+  showNotification("Click Play button to start music");
+}
+
+/**
+ * Sync playback state to the room
+ * @param {boolean} isPlaying - Whether audio is playing
+ */
+function syncPlaybackState(isPlaying) {
+  const room = document.getElementById("room")?.value.trim();
+  const audioPlayer = document.getElementById("audioPlayer");
+  
+  if (!room || !audioPlayer) return;
+  
+  const currentTrack = loadedTracks[currentTrackIndex];
+  if (!currentTrack) return;
+  
+  const track = {
+    url: currentTrack._objectUrl,
+    title: currentTrack.name.replace(/\.[^/.]+$/, ""),
+    duration: audioPlayer.duration || 0
+  };
+  
+  // Update track and playback state together in a timely manner
+  console.log(`Syncing playback state: isPlaying=${isPlaying}, position=${audioPlayer.currentTime.toFixed(2)}`);
+  
+  // Use Promise.all to ensure both operations happen together
+  Promise.all([
+    updateCurrentTrack(room, track),
+    updatePlaybackState(room, isPlaying, audioPlayer.currentTime)
+  ]).then(() => {
+    console.log('✅ Track and playback state successfully synced');
+  }).catch(err => {
+    console.error('❌ Failed to sync track and playback state:', err);
+  });
+}
+
 // Play the next track
-function playNextTrack() {
+async function playNextTrack() {
   if (loadedTracks.length === 0) return;
   
   if (shuffleMode) {
@@ -574,7 +759,7 @@ function playNextTrack() {
     currentTrackIndex = (currentTrackIndex + 1) % loadedTracks.length;
   }
   
-  playCurrentTrack();
+  await playCurrentTrack();
 }
 
 // Function to show notifications with mobile optimization
@@ -620,4 +805,26 @@ function toggleSync(enabled = true) {
   }
   
   return true;
+}
+
+/**
+ * Safely play a track from URL (automatically gets room from input)
+ * @param {string} trackUrl - The URL of the track to play
+ * @returns {boolean} - Whether playback was initiated successfully
+ */
+function safePlayTrack(trackUrl) {
+  if (!trackUrl) {
+    console.error('❌ No track URL provided to safePlayTrack');
+    return false;
+  }
+  
+  const room = document.getElementById("room")?.value.trim();
+  if (!room) {
+    console.error('❌ No room selected, cannot play track');
+    alert('Please enter a room name first before playing tracks.');
+    return false;
+  }
+  
+  console.log(`🎵 Playing track via safePlayTrack: ${trackUrl}`);
+  return playTrack(room, trackUrl);
 }

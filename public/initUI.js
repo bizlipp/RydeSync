@@ -1,5 +1,7 @@
 // Import functions from the app module
 import { joinRoom, leaveRoom } from './app/app.js';
+import { getRoomPlaylist, removeTrackFromPlaylist, addTrackToPlaylist } from './app/modules/playlistMemory.js';
+import { safePlayTrack } from './app/modules/musicPlayer.js';
 
 /**
  * Set up any tooltip functionality
@@ -91,6 +93,62 @@ function setupAboutModal() {
 }
 
 /**
+ * Render the playlist UI with the current tracks
+ */
+function renderPlaylistUI() {
+  const playlistContainer = document.getElementById('playlistContainer');
+  if (!playlistContainer) return;
+  
+  playlistContainer.innerHTML = '';
+
+  const playlist = getRoomPlaylist();
+  
+  if (playlist.length === 0) {
+    playlistContainer.innerHTML = '<div class="playlist-empty">No tracks in playlist yet</div>';
+    return;
+  }
+  
+  playlist.forEach(url => {
+    const trackItem = document.createElement('div');
+    trackItem.className = 'playlist-item';
+    trackItem.innerHTML = `
+      🎵 <a href="#" data-url="${url}">${shortenUrl(url)}</a> 
+      <button data-remove="${url}">❌</button>
+    `;
+    playlistContainer.appendChild(trackItem);
+  });
+
+  // Attach play click
+  playlistContainer.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const trackUrl = e.target.getAttribute('data-url');
+      console.log('🔁 Replaying track:', trackUrl);
+      safePlayTrack(trackUrl);
+    });
+  });
+
+  // Attach remove click
+  playlistContainer.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const trackUrl = e.target.getAttribute('data-remove');
+      removeTrackFromPlaylist(trackUrl);
+      renderPlaylistUI(); // re-render
+    });
+  });
+}
+
+// Helper to shorten long URLs visually
+function shortenUrl(url) {
+  try {
+    const parts = url.split('/');
+    return parts[parts.length - 1].slice(0, 15) + '...';
+  } catch {
+    return url;
+  }
+}
+
+/**
  * Set up core UI event listeners
  * @private
  */
@@ -174,6 +232,10 @@ function setupEventListeners() {
         if (typeof module.syncToTrack === 'function') {
           module.syncToTrack({ url: cleanedUrl, room: roomName });
           
+          // Add track to playlist
+          addTrackToPlaylist(cleanedUrl);
+          renderPlaylistUI();
+          
           // Clear input and hide panel
           trackInput.value = '';
           shareTrackPanel.style.display = 'none';
@@ -220,4 +282,7 @@ export function setupUI() {
   
   // Set up tooltips
   setupTooltips();
+  
+  // Initial render of playlist UI
+  renderPlaylistUI();
 } 

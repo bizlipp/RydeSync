@@ -24,10 +24,27 @@ export function initVolumeControl() {
     // Set initial volume from slider
     setVolume(volumeSlider.value / 100);
     
+    // Create volume popup element once
+    let volumePopup = document.getElementById('volumePopup');
+    if (!volumePopup) {
+      volumePopup = document.createElement('div');
+      volumePopup.id = 'volumePopup';
+      document.body.appendChild(volumePopup);
+    }
+    
     // Add event listeners
     volumeSlider.addEventListener('input', () => {
       const newVolume = volumeSlider.value / 100;
       setVolume(newVolume);
+      
+      // Show volume % while dragging
+      volumePopup.textContent = `${volumeSlider.value}%`;
+      volumePopup.style.opacity = 1;
+      
+      clearTimeout(volumePopup.timeoutId);
+      volumePopup.timeoutId = setTimeout(() => {
+        volumePopup.style.opacity = 0;
+      }, 1500);
       
       // If volume is set to 0, update mute button state
       if (newVolume === 0) {
