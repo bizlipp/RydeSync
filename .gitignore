@@ -57,3 +57,12 @@ firebase-debug.log
 # Misc
 yarn-debug.log*
 yarn-error.log*
+
+# old junk
+public/legacy/
+public/syncMusicPlayer.js   # duplicate, slated for removal
+
+# build artefacts
+dist/
+node_modules/
+.next/

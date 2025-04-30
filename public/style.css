@@ -247,8 +247,12 @@ button:active {
 }
 
 #muteBtn.muted {
-  background-color: rgba(220, 20, 60, 0.2);
-  border-color: rgba(220, 20, 60, 0.5);
+  background-color: #ff5757;
+  color: white;
+}
+
+#muteBtn.muted svg {
+  stroke: white;
 }
 
 .loader {
@@ -1360,4 +1364,374 @@ audio::-moz-range-thumb {
 /* === Crossfade Transitions === */
 #audioPlayer {
   transition: volume 0.8s ease; /* Smooth fade-in/out */
+}
+
+/* === Synthetic Souls Room Theme === */
+.synthetic-souls-theme {
+  background: linear-gradient(135deg, #0f0f0f, #1a0033, #330066);
+  color: #eee;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.synthetic-souls-theme #musicPlayer {
+  background: rgba(0, 0, 0, 0.8);
+  border: 2px solid #ff31ff;
+  box-shadow: 0 0 20px #ff31ffaa;
+}
+
+.synthetic-souls-theme #trackList li {
+  border-bottom: 1px solid #ff31ff88;
+}
+
+.synthetic-souls-theme button {
+  background: #ff31ff;
+  color: black;
+  border: none;
+  padding: 0.5em 1em;
+  border-radius: 8px;
+}
+
+.synthetic-souls-theme button:hover {
+  background: #ff66ff;
+}
+
+.synthetic-souls-header {
+  font-size: 24px;
+  color: #ff31ff;
+  text-shadow: 0 0 10px #ff31ff, 0 0 20px #ff31ff;
+  margin: 20px 0;
+  letter-spacing: 3px;
+  position: relative;
+  display: inline-block;
+  animation: glitch-header 1.5s infinite alternate;
+}
+
+@keyframes glitch-header {
+  0%, 100% {
+    text-shadow: 0 0 10px #ff31ff, 0 0 20px #ff31ff;
+    transform: translateX(0);
+  }
+  30% {
+    text-shadow: -2px 0 #00ffff, 2px 0 #ff31ff;
+    transform: translateX(1px);
+  }
+  60% {
+    text-shadow: 2px 0 #00ffff, -2px 0 #ff31ff;
+    transform: translateX(-1px);
+  }
+}
+
+/* Specific input styling for Synthetic Souls */
+.synthetic-souls-theme input {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #ff31ff;
+  color: #fff;
+}
+
+.synthetic-souls-theme input:focus {
+  box-shadow: 0 0 15px #ff31ff88;
+}
+
+/* Synthetic Souls Room - Intro Animation */
+#syntheticIntroScreen.show {
+  animation: fadeInGlitch 2s forwards;
+  pointer-events: all;
+}
+
+@keyframes fadeInGlitch {
+  0% {
+    opacity: 0;
+    transform: scale(1.5) rotate(5deg);
+    filter: blur(8px);
+  }
+  25% {
+    opacity: 0.5;
+    transform: scale(1.2) rotate(-3deg);
+    filter: blur(4px);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: blur(0px);
+  }
+  80% {
+    opacity: 0.8;
+    transform: scale(1) rotate(0deg);
+    filter: blur(1px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+    filter: none;
+  }
+}
+
+/* Additional effects for Synthetic Souls room */
+.synthetic-souls-theme .app-header {
+  position: relative;
+  overflow: hidden;
+}
+
+.synthetic-souls-theme .app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -150%;
+  width: 150%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 49, 255, 0.4), transparent);
+  transform: skewX(-20deg);
+  animation: headerGlow 8s ease infinite;
+}
+
+@keyframes headerGlow {
+  0% { left: -150%; }
+  40%, 50% { left: 150%; }
+  100% { left: 150%; }
+}
+
+/* Enhance controls for more cyberpunk feel */
+.synthetic-souls-theme #controls {
+  background: rgba(10, 0, 20, 0.7);
+  border-color: #ff31ff;
+}
+
+.synthetic-souls-theme #musicTitle {
+  color: #ff31ff;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 5px #ff31ff;
+}
+
+/* Track playing highlight effect */
+.synthetic-souls-theme #trackList li.active {
+  background: rgba(255, 49, 255, 0.2);
+  animation: trackPulse 4s infinite alternate;
+}
+
+@keyframes trackPulse {
+  0%, 100% { box-shadow: 0 0 5px #ff31ff; }
+  50% { box-shadow: 0 0 15px #ff31ff; }
+}
+
+/* === Plugin Themes === */
+body.theme-foxecho {
+  background: url('/themes/foxecho-forest.svg') center/cover no-repeat fixed;
+  animation: forestGlow 10s ease-in-out infinite alternate;
+}
+
+body.theme-syntheticsouls {
+  background: radial-gradient(circle, #330066 0%, #000 80%);
+  background-size: cover;
+  animation: glitchPulse 4s infinite alternate;
+}
+
+/* Theme Logo Overlay */
+.theme-logo {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  font-size: 2rem;
+  z-index: 1000;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.logo-foxecho::before {
+  content: "🦊";
+}
+.logo-syntheticsouls::before {
+  content: "💀";
+}
+
+/* Offline Banner */
+#offlineBanner {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffcc00;
+  color: black;
+  padding: 8px 16px;
+  font-weight: bold;
+  border-radius: 4px;
+  z-index: 1500;
+  display: none;
+}
+
+/* Theme Animations */
+@keyframes forestGlow {
+  0% { filter: brightness(0.95); }
+  100% { filter: brightness(1.05); }
+}
+
+@keyframes glitchPulse {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(30deg); }
+}
+/* === Phase 9.1 Music Player Layout Styles === */
+
+#musicPlayer {
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 10px;
+  padding: 1rem;
+  max-width: 700px;
+  margin: 2rem auto;
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.2);
+  font-family: 'Orbitron', sans-serif;
+  transition: all 0.3s ease;
+}
+
+#musicHeader {
+  text-align: center;
+  font-size: 1.2rem;
+  color: #0ff;
+  margin-bottom: 1rem;
+}
+
+#streamInput {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+#streamInput input {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  background: #111;
+  border: 1px solid #0ff;
+  color: #0ff;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+#streamInput button {
+  background: #0ff;
+  border: none;
+  padding: 0.6rem 1rem;
+  color: #000;
+  font-weight: bold;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+#streamInput button:hover {
+  background: #00ffffaa;
+}
+
+.track-controls {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.track-controls button {
+  background: transparent;
+  border: 1px solid #0ff;
+  color: #0ff;
+  padding: 0.4rem 0.8rem;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.track-controls button:hover {
+  background: #0ff;
+  color: #000;
+}
+
+#trackList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid #333;
+}
+
+.track-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #333;
+  color: #fff;
+}
+
+.track-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-track {
+  background: none;
+  border: none;
+  color: #0ff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+#togglePlayer {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background: #0ff;
+  border: none;
+  color: #000;
+  font-size: 1.2rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 9999;
+  box-shadow: 0 0 10px #0ff;
+}
+
+/* Service Players and Embedded Content */
+#servicePlayerContainer {
+  width: 100%;
+  margin: 10px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background-color: #222;
+}
+
+.service-player {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.service-player-fallback {
+  padding: 15px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 8px;
+}
+
+.service-player-fallback a {
+  color: #00AEEF;
+  text-decoration: underline;
+  display: block;
+  margin-top: 8px;
+  word-break: break-all;
+}
+
+.youtube-player {
+  height: 240px;
+}
+
+.spotify-player {
+  height: 80px;
+}
+
+.soundcloud-player {
+  height: 166px;
+}
+
+.apple-music-player {
+  height: 160px;
 }

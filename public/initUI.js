@@ -205,13 +205,13 @@ function setupEventListeners() {
       return url; // Return original if it's not Google Drive
     }
 
-    submitTrackBtn.addEventListener('click', () => {
-      const trackInput = document.getElementById('trackUrlInput');
+    submitTrackBtn.addEventListener('click', async () => {
+      const trackUrlInput = document.getElementById('trackUrlInput');
       const roomInput = document.getElementById('room');
       
-      if (!trackInput || !roomInput) return;
+      if (!trackUrlInput || !roomInput) return;
 
-      const rawUrl = trackInput.value.trim();
+      const rawUrl = trackUrlInput.value.trim();
       const roomName = roomInput.value.trim();
 
       if (!roomName) {
@@ -219,36 +219,162 @@ function setupEventListeners() {
         return;
       }
 
-      if (!rawUrl) {
+      if (!rawUrl || !rawUrl.startsWith('http')) {
         alert('Please paste a valid track URL.');
         return;
       }
 
       const cleanedUrl = cleanTrackUrl(rawUrl); // Clean the URL before sending
-      console.log(`Sharing track to room: ${cleanedUrl} for room ${roomName}`);
       
-      // Call syncToTrack function from app.js
-      import('./app/app.js').then(module => {
-        if (typeof module.syncToTrack === 'function') {
-          module.syncToTrack({ url: cleanedUrl, room: roomName });
+      // Extract a simple title from the URL (smart but basic)
+      const urlParts = cleanedUrl.split('/');
+      let trackTitle = urlParts[urlParts.length - 1].split('?')[0];
+      trackTitle = decodeURIComponent(trackTitle.replace(/[-_]/g, ' '));
+      if (trackTitle.length > 30) trackTitle = trackTitle.substring(0, 27) + '...';
+      
+      console.log(`Sharing track to room: ${trackTitle} (${cleanedUrl}) for room ${roomName}`);
+      
+      try {
+        // Add track to playlist
+        addTrackToPlaylist(cleanedUrl);
+        renderPlaylistUI();
+        
+        // Update UI immediately
+        const trackListEl = document.getElementById('trackList');
+        if (trackListEl) {
+          const li = document.createElement('li');
+          li.className = 'track-item';
+          li.innerHTML = `
+            <span class="track-title">${trackTitle}</span>
+            <button class="play-track" data-url="${cleanedUrl}">▶️</button>
+          `;
+          li.addEventListener('click', () => {
+            const audio = document.getElementById('audioPlayer');
+            if (audio) {
+              audio.src = cleanedUrl;
+              audio.play().catch(err => console.warn('Autoplay failed:', err));
+            }
+          });
+          trackListEl.appendChild(li);
+        }
+        
+        // Use new plugin system
+        try {
+          // Import the appropriate plugin based on the current room type
+          const pluginManagerModule = await import('./pluginManager.js');
+          const roomType = pluginManagerModule.getCurrentRoomType() || 'music';
           
-          // Add track to playlist
-          addTrackToPlaylist(cleanedUrl);
-          renderPlaylistUI();
+          if (roomType === 'music') {
+            const syncModule = await import('./plugins/syncMusicPlayer.js');
+            if (typeof syncModule.syncTrackToRoom === 'function') {
+              // Call the plugin function to sync the track
+              await syncModule.syncTrackToRoom(cleanedUrl, trackTitle, roomName);
+              console.log('Track synced via music plugin');
+            }
+          } else if (roomType === 'foxecho') {
+            const foxechoModule = await import('./plugins/foxecho.js');
+            // Use the standard music player sync as a fallback if the module doesn't have its own sync method
+            const syncModule = await import('./plugins/syncMusicPlayer.js');
+            await syncModule.syncTrackToRoom(cleanedUrl, trackTitle, roomName);
+            console.log('Track synced via foxecho plugin fallback');
+          } else if (roomType === 'syntheticsouls') {
+            const soulsModule = await import('./plugins/syntheticsouls.js');
+            // Use the standard music player sync as a fallback if the module doesn't have its own sync method
+            const syncModule = await import('./plugins/syncMusicPlayer.js');
+            await syncModule.syncTrackToRoom(cleanedUrl, trackTitle, roomName);
+            console.log('Track synced via syntheticsouls plugin fallback');
+          } else {
+            // Default fallback for any other room type
+            const syncModule = await import('./plugins/syncMusicPlayer.js');
+            if (typeof syncModule.syncTrackToRoom === 'function') {
+              await syncModule.syncTrackToRoom(cleanedUrl, trackTitle, roomName);
+              console.log('Track synced via default plugin fallback');
+            }
+          }
           
           // Clear input and hide panel
-          trackInput.value = '';
-          shareTrackPanel.style.display = 'none';
-        } else {
-          console.error('syncToTrack function not found in app.js');
-          alert('Could not sync track. Function not available.');
+          trackUrlInput.value = '';
+          const shareTrackPanel = document.getElementById('shareTrackPanel');
+          if (shareTrackPanel) {
+            shareTrackPanel.style.display = 'none';
+          }
+          
+          // Show success notification
+          showNotification('✅ Track added to playlist!');
+        } catch (err) {
+          console.error('Error syncing track:', err);
+          
+          // Try direct player method as fallback
+          const audioPlayer = document.getElementById('audioPlayer');
+          if (audioPlayer) {
+            audioPlayer.src = cleanedUrl;
+            audioPlayer.load();
+            audioPlayer.play().catch(err => console.warn('Play blocked:', err));
+            
+            // Clear input and hide panel
+            trackUrlInput.value = '';
+            const shareTrackPanel = document.getElementById('shareTrackPanel');
+            if (shareTrackPanel) {
+              shareTrackPanel.style.display = 'none';
+            }
+            
+            // Still show success
+            showNotification('✅ Track added (fallback mode)');
+          } else {
+            showNotification('❌ Error adding track. Please try again.', 'error');
+          }
         }
-      }).catch(err => {
-        console.error('Error loading app.js or syncing track:', err);
-        alert('Error syncing track. Please try again.');
-      });
+      } catch (err) {
+        console.error('Error syncing track:', err);
+        showNotification('❌ Error adding track. Please try again.', 'error');
+      }
     });
   }
+}
+
+/**
+ * Show a temporary notification to the user
+ * @param {string} message - Message to display
+ * @param {string} type - Notification type ('success', 'error', etc)
+ */
+function showNotification(message, type = 'success') {
+  // Add CSS for notifications if not already present
+  if (!document.getElementById('notification-styles')) {
+    const style = document.createElement('style');
+    style.id = 'notification-styles';
+    style.textContent = `
+      .notification {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        background: ${type === 'error' ? '#f44336' : '#4CAF50'};
+        color: white;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        z-index: 1000;
+        opacity: 1;
+        transition: opacity 0.5s ease;
+      }
+      
+      .notification.fade-out {
+        opacity: 0;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Create and show notification
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.textContent = message;
+  document.body.appendChild(notification);
+  
+  // Fade out and remove after delay
+  setTimeout(() => {
+    notification.classList.add('fade-out');
+    setTimeout(() => notification.remove(), 500);
+  }, 2500);
 }
 
 /**

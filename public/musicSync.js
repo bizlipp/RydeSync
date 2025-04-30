@@ -115,7 +115,7 @@ function logConnection(message, data = null) {
  * Join a music room
  * @param {string} roomId - ID of the room to join
  * @param {string} userId - ID of the user joining
- * @param {boolean} asLeader - Whether this user should be set as the room leader
+ * @param {boolean} asLeader - Whether to join as leader if there's no leader
  * @returns {Promise<object>} Room data
  */
 export async function joinMusicRoom(roomId, userId, asLeader = false) {
@@ -123,7 +123,7 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
     throw new Error("Room ID and User ID are required");
   }
   
-  logConnection(`Joining music room ${roomId} as user ${userId}`, { asLeader });
+  logConnection(`Joining music room ${roomId} as user ${userId} (leader: ${asLeader})`);
   
   const roomRef = doc(db, "musicRooms", roomId);
   const roomSnap = await getDoc(roomRef);
@@ -133,11 +133,24 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
     const roomData = roomSnap.data();
     log(`Joining existing room: ${roomId}`, LOG_LEVELS.INFO, roomData);
     
+    // Check if this user is already in the participants array to avoid duplicates
+    let shouldAddParticipant = true;
+    if (roomData.participants && Array.isArray(roomData.participants)) {
+      if (roomData.participants.includes(userId)) {
+        log(`User ${userId} is already in the participants list for room ${roomId}`, LOG_LEVELS.INFO);
+        shouldAddParticipant = false;
+      }
+    }
+    
     // Update the participants list and leader if needed
     const updateData = {
-      participants: arrayUnion(userId),
       updatedAt: serverTimestamp()
     };
+    
+    // Only add to participants array if not already there
+    if (shouldAddParticipant) {
+      updateData.participants = arrayUnion(userId);
+    }
     
     // Set as leader if requested and there's no leader
     if (asLeader && !roomData.leader) {
@@ -151,6 +164,8 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
   } else {
     // Room doesn't exist, create it
     log(`Creating new room: ${roomId}`, LOG_LEVELS.INFO);
+    
+    // For new rooms, we just add a single participant (no duplicates possible)
     const newRoomData = {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -199,9 +214,11 @@ export async function leaveMusicRoom(roomId, userId) {
   });
   
   // If this user was the leader, pick a new leader if there are other participants
-  if (roomData.leader === userId && roomData.participants.length > 1) {
+  if (roomData.leader === userId && roomData.participants && roomData.participants.length > 1) {
     // Get other participants (excluding the leaving user)
     const otherParticipants = roomData.participants.filter(p => p !== userId);
+    
+    // Make sure we actually have other valid participants
     if (otherParticipants.length > 0) {
       // Select the first remaining participant as the new leader
       await updateDoc(roomRef, {
@@ -210,6 +227,29 @@ export async function leaveMusicRoom(roomId, userId) {
       
       log(`New leader assigned: ${otherParticipants[0]}`, LOG_LEVELS.INFO);
     }
+  }
+  
+  // Clean up the participants list by removing duplicates (Ghost Rider fix)
+  try {
+    // Get fresh data after our update
+    const updatedSnap = await getDoc(roomRef);
+    if (updatedSnap.exists()) {
+      const updatedData = updatedSnap.data();
+      if (updatedData.participants && Array.isArray(updatedData.participants)) {
+        // Check for duplicate participants
+        const uniqueParticipants = [...new Set(updatedData.participants)];
+        
+        // If we found duplicates, update the list to remove them
+        if (uniqueParticipants.length < updatedData.participants.length) {
+          log(`Cleaning up ${updatedData.participants.length - uniqueParticipants.length} duplicate participants`, LOG_LEVELS.INFO);
+          await updateDoc(roomRef, {
+            participants: uniqueParticipants
+          });
+        }
+      }
+    }
+  } catch (error) {
+    log(`Error cleaning up participants: ${error.message}`, LOG_LEVELS.ERROR);
   }
   
   // Unsubscribe from active listener if it exists

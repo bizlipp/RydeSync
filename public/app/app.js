@@ -18,20 +18,16 @@
 
 // Import Firebase configuration at the top of the file
 import app from '../src/firebase.js';
-import { listenToMusicSync, resetMusicSync, joinMusicRoom, leaveMusicRoom, getConnectionHealth, updateCurrentTrack, safePlayTrack } from '../musicSync.js';
-import * as MusicSync from '../musicSync.js';
-import { initPlaylistManager } from './modules/playlistManager.js';
-import { initVolumeControl, toggleMute, setVolume } from './modules/volumeControl.js';
-import { adjustPlaybackPosition } from '../src/utils/musicSyncUtils.js';
+import { initializePlugins, cleanupPlugins } from '../pluginManager.js'; 
 
 // Export needed functions
 export { 
-  initializePeer, 
   joinRoom, 
   leaveRoom, 
   handleCall, 
   updateConnectionStatus,
-  updatePeersActivity
+  updatePeersActivity,
+  initializePeer // Export our own initializePeer function
 };
 
 // DEBUG FLAG - Enable verbose logging
@@ -166,21 +162,33 @@ function initializeFirebase() {
 function initializePeer() {
   try {
     if (window.peer) {
-      window.peer.destroy();
+      try {
+        // Clean up existing peer connection if it exists
+        window.peer.destroy();
+      } catch (err) {
+        console.warn("Error destroying existing peer connection:", err);
+      }
+      window.peer = null;
     }
     
+    // Set up new PeerJS instance with more robust configuration
     window.peer = new Peer(undefined, {
       host: location.hostname,
-      port: location.port || 443,
+      port: location.port || (location.protocol === 'https:' ? 443 : 9000),
       path: '/peerjs',
       secure: location.protocol === 'https:',
       debug: 2, // Set debug level
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:global.stun.twilio.com:3478' }
+          { urls: 'stun:global.stun.twilio.com:3478' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' }
         ]
-      }
+      },
+      // Add retry options
+      retryDelay: 500,
+      retryTimes: 5
     });
 
     // DEBUG: Add detailed PeerJS event listeners
@@ -193,49 +201,128 @@ function initializePeer() {
 
     window.peer.on("error", (error) => {
       console.error("❌ Peer error:", error);
-      document.getElementById("status").innerText = `⚠️ Error: ${error.type}`;
+      
+      try {
+        document.getElementById("status").innerText = `⚠️ Error: ${error.type}`;
+      } catch (e) {
+        console.warn("Could not update status element:", e);
+      }
       
       // Handle specific errors
-      if (error.type === 'network' || error.type === 'disconnected' || error.type === 'server-error') {
+      if (error.type === 'network' || error.type === 'disconnected' || 
+          error.type === 'server-error' || error.type === 'socket-error' ||
+          error.type === 'socket-closed') {
         updateConnectionStatus('disconnected', `Connection lost: ${error.type}`);
-        reconnect();
+        
+        // If we're already attempting to reconnect, don't start another attempt
+        if (!reconnectTimer) {
+          reconnect();
+        }
       } else if (error.type === 'peer-unavailable') {
         // Don't reconnect for unavailable peers, just inform the user
         updateConnectionStatus('warning', 'The peer you tried to connect to is unavailable');
+      } else if (error.type === 'browser-incompatible') {
+        updateConnectionStatus('failed', 'Your browser is not compatible with WebRTC');
+      } else if (error.type === 'invalid-id') {
+        updateConnectionStatus('warning', 'Invalid peer ID used');
+        // Attempt to get a new ID by reconnecting
+        reconnect();
+      } else if (error.type === 'unavailable-id') {
+        updateConnectionStatus('warning', 'ID is unavailable, getting a new one');
+        // Get a new ID from the server
+        reconnect();
+      } else {
+        // For any other errors, attempt to reconnect anyway
+        updateConnectionStatus('disconnected', `Connection error: ${error.type}`);
+        
+        if (!reconnectTimer) {
+          reconnect();
+        }
       }
     });
 
     window.peer.on("open", (id) => {
       console.log(`Peer connection established with ID: ${id}`);
-      document.getElementById("status").innerText = `🟢 Connected: ${id}`;
+      
+      try {
+        document.getElementById("status").innerText = `🟢 Connected: ${id}`;
+      } catch (e) {
+        console.warn("Could not update status element:", e);
+      }
+      
       reconnectAttempts = 0; // Reset reconnect attempts on successful connection
       updateConnectionStatus('connected', 'Connection established');
       
       // Update debug status
-      updateDebugStatusBar();
+      try {
+        updateDebugStatusBar();
+      } catch (e) {
+        console.warn("Could not update debug status bar:", e);
+      }
+      
+      // Clear any pending reconnect timers
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       
       // If we were trying to join a room, complete the process
       if (joined) {
-        completeRoomJoin(id);
+        try {
+          completeRoomJoin(id);
+        } catch (e) {
+          console.error("Error completing room join:", e);
+          updateConnectionStatus('warning', 'Connected, but could not join room');
+        }
       }
     });
 
     window.peer.on("disconnected", () => {
       console.warn("Peer disconnected from server");
-      document.getElementById("status").innerText = "⚠️ Connection to server lost";
+      
+      try {
+        document.getElementById("status").innerText = "⚠️ Connection to server lost";
+      } catch (e) {
+        console.warn("Could not update status element:", e);
+      }
+      
       updateConnectionStatus('disconnected', 'Disconnected from server');
       
       // Update debug status
-      updateDebugStatusBar();
+      try {
+        updateDebugStatusBar();
+      } catch (e) {
+        console.warn("Could not update debug status bar:", e);
+      }
       
-      // Try to reconnect
-      window.peer.reconnect();
+      // Try to reconnect directly through PeerJS
+      try {
+        window.peer.reconnect();
+      } catch (e) {
+        console.error("PeerJS reconnect failed:", e);
+        
+        // If PeerJS reconnect fails, use our custom reconnection logic
+        if (!reconnectTimer) {
+          reconnect();
+        }
+      }
     });
 
     window.peer.on("close", () => {
       console.warn("Peer connection closed");
-      document.getElementById("status").innerText = "🚫 Connection closed";
+      
+      try {
+        document.getElementById("status").innerText = "🚫 Connection closed";
+      } catch (e) {
+        console.warn("Could not update status element:", e);
+      }
+      
       updateConnectionStatus('disconnected', 'Connection closed');
+      
+      // If connection was closed and we were in a room, attempt to reconnect
+      if (joined && !reconnectTimer) {
+        reconnect();
+      }
     });
     
     // Set up call handler
@@ -243,14 +330,32 @@ function initializePeer() {
       if (window.localStream) {
         call.answer(window.localStream);
         handleCall(call);
+      } else {
+        // If we don't have a local stream yet, answer with audio-only
+        // This prevents blocking calls when users haven't granted mic access
+        console.log("Answering call without local stream (audio-only mode)");
+        call.answer();
+        handleCall(call);
       }
     });
     
     return true;
   } catch (err) {
     console.error("❌ Error initializing peer:", err);
-    document.getElementById("status").innerText = `⚠️ Connection error: ${err.message}`;
+    
+    try {
+      document.getElementById("status").innerText = `⚠️ Connection error: ${err.message}`;
+    } catch (e) {
+      console.warn("Could not update status element:", e);
+    }
+    
     updateConnectionStatus('disconnected', `Connection error: ${err.message}`);
+    
+    // Attempt to recover from initialization error
+    if (!reconnectTimer) {
+      reconnect();
+    }
+    
     return false;
   }
 }
@@ -342,6 +447,66 @@ function performRoomJoin(room, peerId, stream) {
     // Initialize audio system
     if (stream) {
       document.getElementById("muteBtn").disabled = false;
+      
+      // Add mute button functionality
+      const muteBtn = document.getElementById('muteBtn');
+      if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+          if (window.localStream) {
+            const enabled = window.localStream.getAudioTracks()[0].enabled;
+            // Toggle audio tracks enabled state
+            window.localStream.getAudioTracks().forEach(track => {
+              track.enabled = !enabled;
+            });
+            
+            // Update UI
+            window.isMuted = !enabled;
+            muteBtn.classList.toggle('muted', !enabled); // Visual feedback
+            
+            // Create new SVG for muted or unmuted state
+            const newSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            newSvg.setAttribute("class", "icon");
+            newSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+            newSvg.setAttribute("viewBox", "0 0 24 24");
+            newSvg.setAttribute("fill", "none");
+            newSvg.setAttribute("stroke", "currentColor");
+            
+            if (!enabled) {
+              // Muted microphone icon
+              const line1 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+              line1.setAttribute("x1", "1");
+              line1.setAttribute("y1", "1");
+              line1.setAttribute("x2", "23");
+              line1.setAttribute("y2", "23");
+              newSvg.appendChild(line1);
+              
+              const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path.setAttribute("d", "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z");
+              newSvg.appendChild(path);
+              
+              const path2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path2.setAttribute("d", "M19 10v2a7 7 0 0 1-14 0v-2");
+              newSvg.appendChild(path2);
+            } else {
+              // Unmuted microphone icon
+              const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path.setAttribute("d", "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z");
+              newSvg.appendChild(path);
+              
+              const path2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path2.setAttribute("d", "M19 10v2a7 7 0 0 1-14 0v-2");
+              newSvg.appendChild(path2);
+            }
+            
+            // Update button content
+            muteBtn.innerHTML = '';
+            muteBtn.appendChild(newSvg);
+            muteBtn.appendChild(document.createTextNode(!enabled ? 'Unmute' : 'Mute'));
+            
+            console.log(`Microphone ${!enabled ? 'muted' : 'unmuted'}`);
+          }
+        });
+      }
     }
     
     // Mark as joined
@@ -351,7 +516,7 @@ function performRoomJoin(room, peerId, stream) {
     // Request peer list from server and connect to them
     fetch(`/peers?room=${room}`)
       .then(res => res.json())
-      .then(peers => {
+      .then(async peers => {
         // Update UI
         document.getElementById("status").innerText = `🟢 Joined room: ${room}`;
         document.getElementById("joinBtn").disabled = false;
@@ -379,7 +544,16 @@ function performRoomJoin(room, peerId, stream) {
         // Update debug status
         updateDebugStatusBar();
         
-        // Initialize music sync for this room
+        // Initialize plugins now that we've joined a room
+        try {
+          console.log('Room joined successfully, initializing plugins...');
+          await initializePlugins();
+        } catch (pluginError) {
+          console.error('Error initializing plugins:', pluginError);
+        }
+        
+        // Initialize music sync for this room - Now handled by plugins
+        /* 
         joinMusicRoom(room, peerId)
           .then(roomData => {
             console.log(`Joined music room: ${room}`, roomData);
@@ -420,6 +594,7 @@ function performRoomJoin(room, peerId, stream) {
           .catch(err => {
             console.error(`Error joining music room: ${room}`, err);
           });
+        */
       })
       .catch(err => {
         console.error("Error fetching peers:", err);
@@ -529,6 +704,8 @@ function leaveRoom() {
     if (leaveBtn) leaveBtn.style.display = "none";
     
     // Leave the music room
+    // Now handled by plugins
+    /*
     if (window.peer && window.peer.id) {
       leaveMusicRoom(room, window.peer.id)
         .catch(err => console.error("Error leaving music room:", err));
@@ -536,6 +713,7 @@ function leaveRoom() {
     
     // Reset music sync state
     resetMusicSync();
+    */
     
     // Close all peer connections
     if (window.connections && window.connections.length > 0) {
@@ -573,6 +751,9 @@ function leaveRoom() {
       method: "POST"
     }).catch(err => console.error("Error notifying server about leave:", err));
     
+    // Call cleanup plugins
+    cleanupPlugins();
+    
     return true;
   } catch (err) {
     console.error("Error leaving room:", err);
@@ -583,6 +764,10 @@ function leaveRoom() {
 
 // Stop all Firebase listeners
 function stopAllListeners() {
+  // Now handled by plugins, this function is retained for backward compatibility
+  console.log('stopAllListeners: Now handled by the plugin system');
+  
+  /*
   // Unsubscribe from music sync
   if (typeof window.unsubscribe === 'function') {
     // DEBUG: Log unsubscribe
@@ -628,6 +813,7 @@ function stopAllListeners() {
       console.log('✅ All Firebase listeners successfully removed');
     }
   }, 500);
+  */
 }
 
 /**
@@ -699,36 +885,6 @@ function updateDebugStatusBar() {
         }
       }
       
-/**
- * Sync to a track URL in a music room
- * @param {Object} trackData - Track data object
- * @param {string} trackData.url - Track URL
- * @param {string} trackData.room - Room name
- */
-export async function syncToTrack({ url, room }) {
-  if (!url || !room) {
-    console.error('Missing URL or Room');
-    return;
-  }
-  
-  console.log(`Syncing track to room: ${room}`);
-
-  // Use the global peer variable instead of importing it
-  const userId = peer?.id || null;
-  if (!userId) {
-    console.error('No Peer ID found, cannot sync track.');
-    return;
-  }
-
-  try {
-    await joinMusicRoom(room, userId);
-    await updateCurrentTrack(room, { url });
-    console.log('Track synced successfully.');
-  } catch (err) {
-    console.error('Error syncing track:', err);
-  }
-}
-
 /**
  * Handle an incoming or outgoing call
  * @param {PeerCall} call - The PeerJS call object
@@ -1009,56 +1165,17 @@ function stringToColor(str) {
 }
 
 // Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 Initializing application...');
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('🚀 RydeSync Core Initializing...');
 
   // Initialize Firebase
-initializeFirebase();
+  initializeFirebase();
   
-  // Initialize Peer connection
-  initializePeer();
-  
-  // Initialize the playlist manager
-  if (initPlaylistManager()) {
-    console.log('✅ Playlist manager initialized');
-  } else {
-    console.error('❌ Failed to initialize playlist manager');
-  }
-  
-  // Initialize volume controls
-  if (initVolumeControl()) {
-    console.log('✅ Volume controls initialized');
-  } else {
-    console.warn('⚠️ Volume controls not available');
-  }
+  // Initialize plugin system - this will be called by main.js
+  // Avoid calling it here to prevent circular dependencies
   
   // Initialize peer visualization
   setupPeerVisualization();
-  
-  // Set up the playTrackBtn click event
-  const playTrackBtn = document.getElementById('playTrackBtn');
-  if (playTrackBtn) {
-    playTrackBtn.addEventListener('click', () => {
-      const roomInput = document.getElementById('room');
-      const trackUrlInput = document.getElementById('trackURL');
-      
-      if (!roomInput || !roomInput.value.trim()) {
-        alert('Please enter a room name first');
-        return;
-      }
-      
-      if (!trackUrlInput || !trackUrlInput.value.trim()) {
-        alert('Please enter a track URL');
-        return;
-      }
-      
-      const roomName = roomInput.value.trim();
-      const trackUrl = trackUrlInput.value.trim();
-      
-      console.log(`Play track button clicked: ${trackUrl} in room ${roomName}`);
-      
-      // Call the syncToTrack function
-      syncToTrack({ url: trackUrl, room: roomName });
-    });
-  }
+
+  console.log('✅ RydeSync App Core Ready');
 });

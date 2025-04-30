@@ -3,6 +3,7 @@ import { initializePeer, joinRoom, leaveRoom, updatePeersActivity } from './app/
 import { initializePlayer, setupPlayerControls, playTrack, toggleSync } from './app/modules/musicPlayer.js';
 import { initVolumeControl, toggleMute, setVolume } from './app/modules/volumeControl.js';
 import { loadRoomPlugin } from './pluginManager.js';
+import { initializePlugins } from './pluginManager.js';
 import { 
   listenToMusicSync, 
   joinMusicRoom, 
@@ -26,7 +27,7 @@ window.setVolume = setVolume;
 window.loadPlugin = loadRoomPlugin;
 
 // Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   console.log('Main.js: DOM Content Loaded');
   
   // Basic UI setup from existing module (also handles event listeners)
@@ -44,13 +45,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize volume controls
   initVolumeControl();
   
+  // Don't initialize plugins at page load - we'll do it when joining a room
+  // await initializePlugins();
+  
   // Ensure toggle button works with delayed setup
   setTimeout(() => {
     const togglePlayerBtn = document.getElementById('togglePlayer');
     const musicPlayer = document.getElementById('musicPlayer');
-    
-    console.log('Toggle button found:', !!togglePlayerBtn);
-    console.log('Music player found:', !!musicPlayer);
     
     if (togglePlayerBtn && musicPlayer) {
       // Remove any existing listeners to avoid duplicates
@@ -80,9 +81,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
       });
       
-      console.log('Toggle button event handler attached');
+      console.log('Toggle button event handler attached with polish');
     }
   }, 500); // Short delay to ensure DOM is fully processed
+  
+  // Set up About modal event listeners
+  document.getElementById('aboutBtn')?.addEventListener('click', () => {
+    document.getElementById('aboutModal').style.display = 'block';
+  });
+  document.getElementById('closeAboutBtn')?.addEventListener('click', () => {
+    document.getElementById('aboutModal').style.display = 'none';
+  });
   
   // No need to initialize plugins here - they'll be loaded when joining a room
   // loadRoomPlugin will be called when needed
