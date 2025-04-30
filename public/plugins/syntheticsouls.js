@@ -129,8 +129,8 @@ export async function initializePlugin(roomName) {
     try {
       listenToRoomMusic(roomName);
       
-      // Monitor room participants
-      monitorRoomParticipants(roomName);
+      // Use renamed function to avoid conflict
+      monitorRoomParticipantsSyntheticSouls(roomName);
       
       return true;
     } catch (err) {
@@ -231,9 +231,10 @@ export const initializeSyntheticSoulsPlugin = initializePlugin;
 
 /**
  * Monitor room participants and auto-pause when room is empty
+ * This function is renamed to avoid conflicts with imported monitorRoomParticipants
  * @param {string} room - Room name to monitor
  */
-export function monitorRoomParticipants(room) {
+export function monitorRoomParticipantsSyntheticSouls(room) {
   try {
     const roomRef = getRoomRef(room);
     
