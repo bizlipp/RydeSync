@@ -764,6 +764,17 @@ function leaveRoom() {
     if (joinBtn) joinBtn.style.display = "inline-block";
     if (leaveBtn) leaveBtn.style.display = "none";
     
+    // Clean up volume control and audio contexts
+    import('./modules/volumeControl.js').then(({ cleanupVolumeControl }) => {
+      try {
+        cleanupVolumeControl();
+      } catch (err) {
+        console.warn("Error cleaning up volume control:", err);
+      }
+    }).catch(err => {
+      console.warn("Could not import volume control for cleanup:", err);
+    });
+    
     // Destroy peer connection - this will close all media and data channels
     if (window.peer) {
       window.peer.destroy();
@@ -942,59 +953,120 @@ function handleCall(call) {
       return;
     }
     
-    // Create audio element for this peer if it doesn't exist
-    let audio = document.getElementById(`audio-${call.peer}`);
-    
-    if (!audio) {
-      audio = document.createElement("audio");
-      audio.id = `audio-${call.peer}`;
-      audio.autoplay = true;
-      audio.controls = false;
+    // Import volume control module
+    import('./modules/volumeControl.js').then(({ connectVoiceStream }) => {
+      // Create audio element for this peer if it doesn't exist (still needed for UI/debug)
+      let audio = document.getElementById(`audio-${call.peer}`);
       
-      // Add to document but keep it hidden
-      audio.style.display = "none";
-      document.body.appendChild(audio);
-    }
-    
-    // Handle incoming stream
-    call.on("stream", stream => {
-      console.log(`Received stream from: ${call.peer}`);
-      audio.srcObject = stream;
-
-      // Set volume to current value on volume slider
-      const volumeSlider = document.getElementById("volume");
-      if (volumeSlider) {
-        audio.volume = volumeSlider.value / 100;
+      if (!audio) {
+        audio = document.createElement("audio");
+        audio.id = `audio-${call.peer}`;
+        audio.autoplay = true;
+        audio.controls = false;
+        
+        // Add to document but keep it hidden
+        audio.style.display = "none";
+        document.body.appendChild(audio);
       }
       
-      // Update debug status
-      updateDebugStatusBar();
-    });
-    
-    // Handle call close
-    call.on("close", () => {
-      console.log(`Call with ${call.peer} closed`);
+      // Handle incoming stream
+      call.on("stream", stream => {
+        console.log(`Received stream from: ${call.peer}`);
+        
+        // Set the stream to the audio element (for legacy support)
+        audio.srcObject = stream;
+        
+        // Connect the stream to our Web Audio API volume control
+        const source = connectVoiceStream(stream);
+        if (source) {
+          // Store the source node for later cleanup
+          call._audioSource = source;
+        } else {
+          console.warn(`Could not connect voice stream to Web Audio API, falling back to standard audio element.`);
+        }
+        
+        // Update debug status
+        updateDebugStatusBar();
+      });
       
-      // Remove audio element
-      if (audio && audio.parentNode) {
-        audio.parentNode.removeChild(audio);
+      // Handle call close
+      call.on("close", () => {
+        console.log(`Call with ${call.peer} closed`);
+        
+        // Remove audio element
+        if (audio && audio.parentNode) {
+          audio.parentNode.removeChild(audio);
+        }
+        
+        // Clean up audio source if we created one
+        if (call._audioSource) {
+          // Disconnect from Web Audio API
+          try {
+            call._audioSource.disconnect();
+          } catch (err) {
+            console.warn(`Error disconnecting audio source:`, err);
+          }
+          call._audioSource = null;
+        }
+        
+        // Update debug status
+        updateDebugStatusBar();
+      });
+      
+      // Handle call errors
+      call.on("error", err => {
+        console.error(`Call error with ${call.peer}:`, err);
+        
+        // Remove audio element
+        if (audio && audio.parentNode) {
+          audio.parentNode.removeChild(audio);
+        }
+        
+        // Clean up audio source if we created one
+        if (call._audioSource) {
+          // Disconnect from Web Audio API
+          try {
+            call._audioSource.disconnect();
+          } catch (disconnectErr) {
+            console.warn(`Error disconnecting audio source:`, disconnectErr);
+          }
+          call._audioSource = null;
+        }
+        
+        // Update debug status
+        updateDebugStatusBar();
+      });
+    }).catch(err => {
+      console.error("Error importing volume control module:", err);
+      
+      // Fallback to traditional audio handling
+      let audio = document.getElementById(`audio-${call.peer}`);
+      
+      if (!audio) {
+        audio = document.createElement("audio");
+        audio.id = `audio-${call.peer}`;
+        audio.autoplay = true;
+        audio.controls = false;
+        audio.style.display = "none";
+        document.body.appendChild(audio);
       }
       
-      // Update debug status
-      updateDebugStatusBar();
-    });
-
-    // Handle call errors
-    call.on("error", err => {
-      console.error(`Call error with ${call.peer}:`, err);
+      call.on("stream", stream => {
+        console.log(`Received stream from: ${call.peer} (fallback mode)`);
+        audio.srcObject = stream;
+        updateDebugStatusBar();
+      });
       
-      // Remove audio element on error
-      if (audio && audio.parentNode) {
-        audio.parentNode.removeChild(audio);
-      }
+      call.on("close", () => {
+        if (audio && audio.parentNode) audio.parentNode.removeChild(audio);
+        updateDebugStatusBar();
+      });
       
-      // Update debug status
-      updateDebugStatusBar();
+      call.on("error", err => {
+        console.error(`Call error with ${call.peer}:`, err);
+        if (audio && audio.parentNode) audio.parentNode.removeChild(audio);
+        updateDebugStatusBar();
+      });
     });
   } catch (err) {
     console.error("Error handling call:", err);

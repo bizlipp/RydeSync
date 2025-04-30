@@ -1,7 +1,7 @@
 // public/main.js - Central initialization for RydeSync
 import { initializePeer, joinRoom, leaveRoom, updatePeersActivity } from './app/app.js';
 import { initializePlayer, setupPlayerControls, playTrack, toggleSync } from './app/modules/musicPlayer.js';
-import { initVolumeControl, toggleMute, setVolume } from './app/modules/volumeControl.js';
+import { initVolumeControl, setVoiceVolume, setMusicVolume, toggleMute } from './app/modules/volumeControl.js';
 import { loadRoomPlugin } from './pluginManager.js';
 import { initializePlugins, cleanupPlugins } from './pluginManager.js';
 import { 
@@ -76,7 +76,8 @@ window.leaveRoom = leaveRoom;
 window.playTrack = playTrack;
 window.toggleSync = toggleSync;
 window.toggleMute = toggleMute;
-window.setVolume = setVolume;
+window.setVoiceVolume = setVoiceVolume;
+window.setMusicVolume = setMusicVolume;
 window.loadPlugin = loadRoomPlugin;
 window.joinRoomWithCleanup = joinRoomWithCleanup;
 window.leaveRoomWithCleanup = leaveRoomWithCleanup;
@@ -97,7 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Set up music player controls
   setupPlayerControls();
   
-  // Initialize volume controls
+  // Initialize enhanced volume controls
   initVolumeControl();
   
   // Don't initialize plugins at page load - we'll do it when joining a room
