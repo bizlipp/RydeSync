@@ -125,8 +125,28 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
   
   logConnection(`Joining music room ${roomId} as user ${userId} (leader: ${asLeader})`);
   
+  // Create roomPrefixed userId for presence tracking
+  // This matches the peer ID format we use in PeerJS
+  const roomPrefixedUserId = `${roomId}-${userId}`;
+  
   const roomRef = doc(db, "musicRooms", roomId);
   const roomSnap = await getDoc(roomRef);
+  
+  // Create a presence document that indicates which room this user is in
+  try {
+    const userPresenceRef = doc(db, "userPresence", userId);
+    await setDoc(userPresenceRef, {
+      currentRoom: roomId,
+      peerId: roomPrefixedUserId,
+      joinedAt: serverTimestamp(),
+      lastActive: serverTimestamp()
+    }, { merge: true });
+    
+    log(`Updated user presence for ${userId} in room ${roomId}`, LOG_LEVELS.INFO);
+  } catch (err) {
+    log(`Failed to update user presence: ${err.message}`, LOG_LEVELS.ERROR);
+    // Continue anyway - presence is not critical
+  }
   
   if (roomSnap.exists()) {
     // Room exists, add participant
@@ -136,8 +156,8 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
     // Check if this user is already in the participants array to avoid duplicates
     let shouldAddParticipant = true;
     if (roomData.participants && Array.isArray(roomData.participants)) {
-      if (roomData.participants.includes(userId)) {
-        log(`User ${userId} is already in the participants list for room ${roomId}`, LOG_LEVELS.INFO);
+      if (roomData.participants.includes(roomPrefixedUserId)) {
+        log(`User ${roomPrefixedUserId} is already in the participants list for room ${roomId}`, LOG_LEVELS.INFO);
         shouldAddParticipant = false;
       }
     }
@@ -149,12 +169,12 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
     
     // Only add to participants array if not already there
     if (shouldAddParticipant) {
-      updateData.participants = arrayUnion(userId);
+      updateData.participants = arrayUnion(roomPrefixedUserId);
     }
     
     // Set as leader if requested and there's no leader
     if (asLeader && !roomData.leader) {
-      updateData.leader = userId;
+      updateData.leader = roomPrefixedUserId;
     }
     
     await updateDoc(roomRef, updateData);
@@ -173,8 +193,8 @@ export async function joinMusicRoom(roomId, userId, asLeader = false) {
       isPlaying: false,
       currentPosition: 0,
       playlist: [],
-      participants: [userId],
-      leader: asLeader ? userId : null
+      participants: [roomPrefixedUserId],
+      leader: asLeader ? roomPrefixedUserId : null
     };
     
     await setDoc(roomRef, newRoomData);
@@ -197,6 +217,25 @@ export async function leaveMusicRoom(roomId, userId) {
   
   logConnection(`Leaving music room ${roomId} as user ${userId}`);
   
+  // Create roomPrefixed userId for presence tracking
+  const roomPrefixedUserId = `${roomId}-${userId}`;
+  
+  // Update user presence to show they've left this room
+  try {
+    const userPresenceRef = doc(db, "userPresence", userId);
+    await setDoc(userPresenceRef, {
+      currentRoom: null,
+      peerId: null,
+      leftAt: serverTimestamp(),
+      lastActive: serverTimestamp()
+    }, { merge: true });
+    
+    log(`Updated user presence for ${userId} leaving room ${roomId}`, LOG_LEVELS.INFO);
+  } catch (err) {
+    log(`Failed to update user presence on leave: ${err.message}`, LOG_LEVELS.ERROR);
+    // Continue anyway - presence is not critical
+  }
+  
   const roomRef = doc(db, "musicRooms", roomId);
   const roomSnap = await getDoc(roomRef);
   
@@ -207,18 +246,25 @@ export async function leaveMusicRoom(roomId, userId) {
   
   const roomData = roomSnap.data();
   
-  // Remove from participants
+  // Remove from participants - use both prefixed and unprefixed to ensure proper cleanup
   await updateDoc(roomRef, {
-    participants: arrayRemove(userId),
+    participants: arrayRemove(roomPrefixedUserId),
     updatedAt: serverTimestamp()
   });
   
+  // Also remove the legacy format (just userId) for backward compatibility
+  await updateDoc(roomRef, {
+    participants: arrayRemove(userId)
+  });
+  
   // If this user was the leader, pick a new leader if there are other participants
-  if (roomData.leader === userId && roomData.participants && roomData.participants.length > 1) {
+  if ((roomData.leader === roomPrefixedUserId || roomData.leader === userId) && 
+      roomData.participants && roomData.participants.length > 1) {
     // Get other participants (excluding the leaving user)
-    const otherParticipants = roomData.participants.filter(p => p !== userId);
+    const otherParticipants = roomData.participants.filter(p => 
+      p !== roomPrefixedUserId && p !== userId && p.includes('-'));
     
-    // Make sure we actually have other valid participants
+    // Make sure we actually have other valid participants with room prefix
     if (otherParticipants.length > 0) {
       // Select the first remaining participant as the new leader
       await updateDoc(roomRef, {

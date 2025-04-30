@@ -171,8 +171,15 @@ function initializePeer() {
       window.peer = null;
     }
     
+    // Get the current room if we're joining one
+    const room = document.getElementById("room").value.trim();
+    const userId = Math.random().toString(36).substr(2, 9); // Generate a random user ID
+    
+    // Create a peer ID that includes the room ID to avoid collisions
+    const peerId = room ? `${room}-${userId}` : userId;
+    
     // Set up new PeerJS instance with more robust configuration
-    window.peer = new Peer(undefined, {
+    window.peer = new Peer(peerId, {
       host: location.hostname,
       port: location.port || (location.protocol === 'https:' ? 443 : 9000),
       path: '/peerjs',
@@ -325,8 +332,19 @@ function initializePeer() {
       }
     });
     
-    // Set up call handler
+    // Set up call handler with room validation
     window.peer.on("call", call => {
+      // Check if call is from the same room
+      const currentRoom = document.getElementById("room").value.trim();
+      const callRoomId = call.metadata?.roomId;
+      
+      // Reject calls from different rooms
+      if (callRoomId !== currentRoom) {
+        console.log(`Rejecting call from different room: ${callRoomId} (we're in ${currentRoom})`);
+        call.close();
+        return;
+      }
+      
       if (window.localStream) {
         call.answer(window.localStream);
         handleCall(call);
@@ -337,6 +355,42 @@ function initializePeer() {
         call.answer();
         handleCall(call);
       }
+    });
+    
+    // Set up connection handler with room validation
+    window.peer.on("connection", conn => {
+      // Check if connection is from the same room
+      const currentRoom = document.getElementById("room").value.trim();
+      const connRoomId = conn.metadata?.roomId;
+      
+      // Reject connections from different rooms
+      if (connRoomId !== currentRoom) {
+        console.log(`Rejecting connection from different room: ${connRoomId} (we're in ${currentRoom})`);
+        conn.close();
+        return;
+      }
+      
+      // Handle valid connection
+      console.log(`Accepting connection from same room: ${connRoomId}`);
+      window.connections.push(conn);
+      
+      // Set up data event handlers
+      conn.on('data', data => {
+        // Handle data messages
+        if (data.type === 'presence' || data.type === 'ping' || data.type === 'pong') {
+          // Update last active time for this peer
+          conn.metadata.lastActive = Date.now();
+        }
+        
+        // If it's a ping, send pong
+        if (data.type === 'ping') {
+          conn.send({
+            type: 'pong',
+            timestamp: Date.now(),
+            pingTimestamp: data.timestamp
+          });
+        }
+      });
     });
     
     return true;
@@ -615,12 +669,14 @@ function connectToPeer(peerId, stream) {
     return;
   }
   
+  const currentRoom = document.getElementById("room").value.trim();
+  
   try {
-    // Establish data connection
+    // Establish data connection with room metadata
     const conn = window.peer.connect(peerId, {
       metadata: {
         type: 'data',
-        room: document.getElementById("room").value,
+        roomId: currentRoom,
         lastActive: Date.now()
       }
     });
@@ -642,13 +698,13 @@ function connectToPeer(peerId, stream) {
           conn.send({
             type: 'ping',
             timestamp: Date.now()
-      });
-      
+          });
+          
           // Update last active time
           conn.metadata.lastActive = Date.now();
         } else {
           clearInterval(pingInterval);
-    }
+        }
       }, 30000); // Every 30 seconds
     });
     
@@ -669,9 +725,14 @@ function connectToPeer(peerId, stream) {
       }
     });
     
-    // If we have a stream, establish media connection
+    // If we have a stream, establish media connection with room metadata
     if (stream) {
-      const call = window.peer.call(peerId, stream);
+      const call = window.peer.call(peerId, stream, {
+        metadata: {
+          roomId: currentRoom
+        }
+      });
+      
       if (call) {
         handleCall(call);
       }
@@ -703,26 +764,9 @@ function leaveRoom() {
     if (joinBtn) joinBtn.style.display = "inline-block";
     if (leaveBtn) leaveBtn.style.display = "none";
     
-    // Leave the music room
-    // Now handled by plugins
-    /*
-    if (window.peer && window.peer.id) {
-      leaveMusicRoom(room, window.peer.id)
-        .catch(err => console.error("Error leaving music room:", err));
-    }
-    
-    // Reset music sync state
-    resetMusicSync();
-    */
-    
-    // Close all peer connections
-    if (window.connections && window.connections.length > 0) {
-    window.connections.forEach(conn => {
-        if (conn && conn.open) {
-        conn.close();
-      }
-    });
-    window.connections = [];
+    // Destroy peer connection - this will close all media and data channels
+    if (window.peer) {
+      window.peer.destroy();
     }
     
     // Stop media stream tracks
@@ -733,6 +777,7 @@ function leaveRoom() {
     
     // Update state
     joined = false;
+    window.connections = [];
     
     // Update UI
     document.getElementById("status").innerText = "Left room";
@@ -753,12 +798,8 @@ function leaveRoom() {
     
     // Call cleanup plugins
     cleanupPlugins();
-    
-    return true;
-  } catch (err) {
-    console.error("Error leaving room:", err);
-    document.getElementById("status").innerText = `Error leaving room: ${err.message}`;
-    return false;
+  } catch (error) {
+    console.error("Error leaving room:", error);
   }
 }
 
@@ -891,7 +932,15 @@ function updateDebugStatusBar() {
  */
 function handleCall(call) {
   try {
-    console.log(`Handling call from/to: ${call.peer}`);
+    const currentRoom = document.getElementById("room").value.trim();
+    console.log(`Handling call from/to: ${call.peer} with metadata:`, call.metadata);
+    
+    // Verify the call is from the correct room
+    if (call.metadata && call.metadata.roomId !== currentRoom) {
+      console.log(`Rejecting call from incorrect room: ${call.metadata.roomId} (we're in ${currentRoom})`);
+      call.close();
+      return;
+    }
     
     // Create audio element for this peer if it doesn't exist
     let audio = document.getElementById(`audio-${call.peer}`);
@@ -899,12 +948,12 @@ function handleCall(call) {
     if (!audio) {
       audio = document.createElement("audio");
       audio.id = `audio-${call.peer}`;
-    audio.autoplay = true;
+      audio.autoplay = true;
       audio.controls = false;
       
       // Add to document but keep it hidden
       audio.style.display = "none";
-    document.body.appendChild(audio);
+      document.body.appendChild(audio);
     }
     
     // Handle incoming stream
@@ -933,7 +982,7 @@ function handleCall(call) {
       
       // Update debug status
       updateDebugStatusBar();
-  });
+    });
 
     // Handle call errors
     call.on("error", err => {

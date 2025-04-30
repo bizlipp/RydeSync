@@ -3,7 +3,7 @@ import { initializePeer, joinRoom, leaveRoom, updatePeersActivity } from './app/
 import { initializePlayer, setupPlayerControls, playTrack, toggleSync } from './app/modules/musicPlayer.js';
 import { initVolumeControl, toggleMute, setVolume } from './app/modules/volumeControl.js';
 import { loadRoomPlugin } from './pluginManager.js';
-import { initializePlugins } from './pluginManager.js';
+import { initializePlugins, cleanupPlugins } from './pluginManager.js';
 import { 
   listenToMusicSync, 
   joinMusicRoom, 
@@ -16,6 +16,59 @@ import { setupUI } from './initUI.js';
 let currentRoom = '';
 let unsubscribe = null;
 
+// Enhanced room management with proper cleanup
+export async function joinRoomWithCleanup(roomName) {
+  console.log(`Joining room with enhanced cleanup: ${roomName}`);
+  
+  // If already in a room, leave it first
+  if (currentRoom) {
+    await leaveRoomWithCleanup();
+  }
+  
+  // Store current room
+  currentRoom = roomName;
+  
+  // Join the room
+  joinRoom();
+  
+  return true;
+}
+
+export async function leaveRoomWithCleanup() {
+  if (!currentRoom) return false;
+  
+  console.log(`Leaving room with enhanced cleanup: ${currentRoom}`);
+  
+  // First destroy peer connection (closes all media and data channels)
+  if (window.peer) {
+    window.peer.destroy();
+  }
+  
+  // Clean up plugins (including music sync)
+  try {
+    await cleanupPlugins(currentRoom);
+  } catch (error) {
+    console.error("Error cleaning up plugins:", error);
+  }
+  
+  // Reset any music sync state
+  resetMusicSync();
+  
+  // Clean up any presence subscriptions
+  if (unsubscribe) {
+    unsubscribe();
+    unsubscribe = null;
+  }
+  
+  // Redirect to home
+  window.location.href = '/';
+  
+  // Clear current room reference
+  currentRoom = '';
+  
+  return true;
+}
+
 // Expose necessary functions to window for HTML access
 // This is necessary for buttons with onclick handlers
 window.joinRoom = joinRoom;
@@ -25,6 +78,8 @@ window.toggleSync = toggleSync;
 window.toggleMute = toggleMute;
 window.setVolume = setVolume;
 window.loadPlugin = loadRoomPlugin;
+window.joinRoomWithCleanup = joinRoomWithCleanup;
+window.leaveRoomWithCleanup = leaveRoomWithCleanup;
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
